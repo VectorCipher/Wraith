@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/VectorCipher/Wraith/blob/main/assets/Cover_image.png" alt="WRAITH Banner" width="90%" />
+  <img src="https://github.com/VectorCipher/Wraith/blob/main/assets/Wraith_banner.png" alt="WRAITH Banner" width="90%" />
 </p>
 
 <br>

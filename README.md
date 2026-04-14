@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Wraith\assets\Cover_image.png" alt="WRAITH Banner" width="100%" />
+  <img src="Wraith\assets\Cover_image.png" alt="WRAITH Banner" width="85%" />
 </p>
 
 <h1 align="center">WRAITH</h1>

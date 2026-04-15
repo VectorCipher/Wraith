@@ -205,3 +205,58 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+env/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database
+*.db
+*.sqlite3
+data/
+
+# Reports
+reports/
+
+# Go
+scanner/cmd/scanner/scanner
+*.exe
+*.out
+
+# Generated gRPC
+agent/scanner_client/scanner_pb2.py
+agent/scanner_client/scanner_pb2_grpc.py
+scanner/proto/*.go
+
+# Docker
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Models (large files)
+*.bin
+*.gguf

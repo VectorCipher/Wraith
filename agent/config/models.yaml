@@ -1,0 +1,244 @@
+# =============================================================================
+# WRAITH — LLM Model Configuration
+# =============================================================================
+#
+# This file defines ALL LLM models used by WRAITH.
+# WRAITH is model-agnostic: swap any model by editing this file.
+# No code changes required.
+#
+# WRAITH uses a DUAL-MODEL architecture:
+#   1. "reasoning" — Strategic thinking, planning, analysis
+#   2. "coding"    — Code analysis, payload generation, remediation
+#
+# Requirements:
+#   - Models must be available in your local Ollama instance
+#   - Pull models first:  ollama pull <model_name>
+#   - Verify with:        ollama list
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Default model to use when a specific role isn't needed
+# (e.g., general-purpose queries that don't fit reasoning or coding)
+# -----------------------------------------------------------------------------
+default_model: "nemotron-cascade-2:latest"
+
+
+# -----------------------------------------------------------------------------
+# Model Definitions by Role
+# -----------------------------------------------------------------------------
+models:
+
+  # ---------------------------------------------------------------------------
+  # REASONING MODEL — The Strategist
+  # ---------------------------------------------------------------------------
+  # Used for:
+  #   - Attack planning and strategy
+  #   - Reconnaissance analysis
+  #   - Vulnerability assessment and triage
+  #   - False positive elimination
+  #   - Multi-step attack chain reasoning
+  #   - Report narrative generation
+  #   - Decision-making (what to test next)
+  # ---------------------------------------------------------------------------
+  reasoning:
+    model_name: "nemotron-cascade-2:latest"
+    description: "Strategic reasoning, planning, and analysis"
+
+    # Temperature controls randomness:
+    #   0.0 = deterministic (same input → same output)
+    #   0.3 = mostly focused, slight variation (recommended for security)
+    #   0.7 = creative, more variation
+    #   1.0 = maximum randomness
+    temperature: 0.3
+
+    # Maximum tokens the model can receive as input (context window).
+    # Larger = can analyze more code/data at once, but uses more RAM.
+    # Check your model's actual limit with: ollama show <model_name>
+    context_window: 8192
+
+    # Maximum tokens the model generates in a single response.
+    # Reasoning tasks often need long outputs for chain-of-thought.
+    max_output_tokens: 4096
+
+    # Top-p (nucleus sampling): only consider tokens whose cumulative
+    # probability mass is within top_p. Lower = more focused.
+    top_p: 0.9
+
+    # Repeat penalty: discourages the model from repeating itself.
+    # 1.0 = no penalty, >1.0 = penalize repetition.
+    repeat_penalty: 1.1
+
+    # Stop sequences: the model stops generating when it outputs these.
+    # Useful for structured output parsing.
+    stop_sequences:
+      - "```"
+      - "END_OF_ANALYSIS"
+      - "---END---"
+
+    # System prompt: injected at the start of every conversation.
+    # This shapes the model's persona and behavior.
+    system_prompt: |
+      You are WRAITH, an expert AI penetration testing agent.
+      You think like a senior security researcher with 15+ years of experience.
+      
+      Your role is STRATEGIC REASONING:
+      - Analyze targets to identify the highest-risk attack vectors
+      - Plan multi-step attack chains that a human pentester would use
+      - Evaluate findings critically — eliminate false positives
+      - Prioritize vulnerabilities by real-world exploitability and impact
+      - Consider the full attack surface before recommending tests
+      
+      Rules:
+      - Be precise and technical. No vague statements.
+      - Always explain your reasoning step by step.
+      - If uncertain, say so and explain what additional data you need.
+      - Format output clearly with headers and bullet points.
+      - Never fabricate findings — only report what evidence supports.
+
+    # Modes supported by this model.
+    # "thinking" = chain-of-thought (model shows its reasoning process)
+    # "instruct" = direct instruction following
+    # Not all models support both. Nemotron-Cascade supports both.
+    supported_modes:
+      - "thinking"
+      - "instruct"
+
+    # Default mode to use when calling this model.
+    default_mode: "thinking"
+
+    # Ollama-specific options passed directly to the API.
+    # See: https://github.com/ollama/ollama/blob/main/docs/modelfile.md
+    ollama_options:
+      num_ctx: 8192        # Must match context_window above
+      num_predict: 4096    # Must match max_output_tokens above
+      temperature: 0.3     # Must match temperature above
+      top_p: 0.9
+      repeat_penalty: 1.1
+
+
+  # ---------------------------------------------------------------------------
+  # CODING MODEL — The Code Specialist
+  # ---------------------------------------------------------------------------
+  # Used for:
+  #   - Source code analysis (white-box testing)
+  #   - Endpoint extraction from source code
+  #   - Payload generation (SQLi, XSS, SSTI, etc.)
+  #   - Vulnerability pattern detection in code
+  #   - Data flow analysis (tracing user input to dangerous sinks)
+  #   - Remediation code generation (actual fixes)
+  #   - Code review and security audit)
+  # ---------------------------------------------------------------------------
+  coding:
+    model_name: "qwen2.5-coder:14b"
+    description: "Code analysis, payload generation, and remediation"
+
+    # Lower temperature for code tasks — we want precise, correct code.
+    # 0.1-0.2 is ideal for code generation and analysis.
+    temperature: 0.2
+
+    # Code models often need large context to analyze full files/modules.
+    context_window: 16384
+
+    # Code outputs can be long (full functions, classes, fixes).
+    max_output_tokens: 4096
+
+    top_p: 0.85
+
+    repeat_penalty: 1.05
+
+    stop_sequences:
+      - "END_OF_CODE"
+      - "---END---"
+
+    system_prompt: |
+      You are WRAITH's code analysis engine.
+      You are an expert in application security, secure coding, and vulnerability research.
+      
+      Your role is CODE-FOCUSED SECURITY ANALYSIS:
+      - Analyze source code to find security vulnerabilities
+      - Trace data flow from user input to dangerous sinks
+      - Generate targeted attack payloads based on code context
+      - Write precise remediation code that fixes vulnerabilities
+      - Detect insecure patterns: SQLi, XSS, SSRF, IDOR, SSTI, etc.
+      
+      Rules:
+      - Output clean, well-formatted code with comments.
+      - When generating payloads, explain WHY each payload works against the target.
+      - When writing fixes, ensure the fix doesn't break functionality.
+      - Use the exact same language and framework as the target application.
+      - Be specific — reference exact file names, line numbers, and functions.
+      - Never output placeholder or pseudo-code. Write real, runnable code.
+
+    supported_modes:
+      - "instruct"
+
+    default_mode: "instruct"
+
+    ollama_options:
+      num_ctx: 16384
+      num_predict: 4096
+      temperature: 0.2
+      top_p: 0.85
+      repeat_penalty: 1.05
+
+
+# -----------------------------------------------------------------------------
+# Model Presets — Quick-Switch Profiles
+# -----------------------------------------------------------------------------
+# These let users switch between hardware tiers with a single config change.
+# Future CLI feature: wraith config --preset lightweight
+# -----------------------------------------------------------------------------
+presets:
+
+  # For machines with 32GB+ RAM and a strong GPU
+  performance:
+    reasoning: "nemotron-cascade-2:latest"
+    coding: "qwen2.5-coder:14b"
+
+  # For machines with 16GB RAM
+  balanced:
+    reasoning: "qwen2.5:7b"
+    coding: "qwen2.5-coder:14b"
+
+  # For machines with 8GB RAM or no GPU
+  lightweight:
+    reasoning: "llama3.2:3b"
+    coding: "qwen2.5-coder:3b"
+
+
+# -----------------------------------------------------------------------------
+# Prompt Formatting
+# -----------------------------------------------------------------------------
+# Controls how prompts are structured before sending to models.
+# Most Ollama models handle chat format natively, but these settings
+# give fine-grained control if needed.
+# -----------------------------------------------------------------------------
+prompt_settings:
+
+  # Maximum number of previous messages to include as context.
+  # Higher = model remembers more, but uses more tokens.
+  max_conversation_history: 10
+
+  # When context exceeds the window, how to truncate:
+  #   "oldest_first" — drop earliest messages
+  #   "summarize"    — ask the model to summarize old context (slower)
+  truncation_strategy: "oldest_first"
+
+  # Include the target's tech stack info in every prompt.
+  # Helps the model generate framework-specific payloads/analysis.
+  include_tech_context: true
+
+  # Include previously discovered vulnerabilities in prompts.
+  # Enables the model to chain attacks and avoid duplicate testing.
+  include_findings_context: true
+
+  # JSON mode: ask the model to respond in structured JSON.
+  # Useful for parsing, but not all models support it reliably.
+  prefer_json_output: false
+
+  # Retry config: if the model gives an unparseable response,
+  # how many times to retry before falling back.
+  max_retries: 3
+  retry_delay_seconds: 2

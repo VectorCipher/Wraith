@@ -1,0 +1,876 @@
+# =============================================================================
+# WRAITH — Attack Module Configuration
+# =============================================================================
+#
+# This file defines ALL attack modules available in WRAITH.
+# Each attack can be enabled/disabled, prioritized, and fine-tuned
+# without touching any code.
+#
+# How it works:
+#   1. The orchestrator calls get_enabled_attacks() to get active modules
+#   2. The planner reads priority + applicable_to to decide attack order
+#   3. Each attack module reads its own config for payloads/behavior
+#   4. The AI reasoning model uses these definitions to plan strategy
+#
+# Fields per attack:
+#   enabled           — Include this attack in scans (true/false)
+#   description       — Human-readable explanation
+#   severity_range    — Expected severity of findings (for prioritization)
+#   category          — Attack family grouping
+#   owasp_category    — OWASP Top 10 (2021) mapping
+#   cwe_ids           — Associated CWE identifiers
+#   applicable_to     — What scan modes can trigger this attack
+#   requires_source   — Does this attack need source code access?
+#   default_priority  — Execution order (1=first, 10=last)
+#   timeout_seconds   — Max time allowed for this attack module
+#   max_payloads      — Maximum payloads to test per injection point
+#   ai_guided         — Should the AI generate custom payloads? (vs static)
+#
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Global Attack Settings
+# -----------------------------------------------------------------------------
+global_settings:
+
+  # Maximum total time (minutes) for the entire exploitation phase.
+  # Individual attacks have their own timeouts, but this is the hard ceiling.
+  max_exploitation_time_minutes: 45
+
+  # When true, the AI analyzes each result to confirm exploitability.
+  # Dramatically reduces false positives but makes scans slower.
+  ai_verification: true
+
+  # When true, the AI attempts to chain vulnerabilities together.
+  # Example: SSRF → internal service → SQLi → data extraction
+  enable_attack_chaining: true
+
+  # Stop testing an endpoint after this many confirmed vulnerabilities.
+  # Prevents wasting time on endpoints already known to be vulnerable.
+  max_findings_per_endpoint: 5
+
+  # Send a baseline (benign) request before each attack to establish
+  # normal response behavior. Used for comparison-based detection.
+  send_baseline_request: true
+
+  # How many payloads to run in parallel via the Go scanner.
+  # Higher = faster but more likely to trigger WAF/rate limiting.
+  parallel_payloads: 10
+
+  # Delay between payload batches (milliseconds).
+  # Helps avoid triggering rate limits or WAF bans.
+  batch_delay_ms: 100
+
+
+# -----------------------------------------------------------------------------
+# Attack Module Definitions
+# -----------------------------------------------------------------------------
+attacks:
+
+  # ===========================================================================
+  # INJECTION ATTACKS
+  # ===========================================================================
+
+  sqli:
+    enabled: true
+    description: "SQL Injection — Extract, modify, or delete database contents"
+    severity_range:
+      - "critical"
+      - "high"
+    category: "injection"
+    owasp_category: "A03:2021 — Injection"
+    cwe_ids:
+      - 89    # CWE-89: SQL Injection
+      - 564   # CWE-564: SQL Injection: Hibernate
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 1
+    timeout_seconds: 300
+    max_payloads: 50
+    ai_guided: true
+
+    # SQLi-specific configuration
+    options:
+      # Sub-techniques to attempt
+      techniques:
+        - "union_based"
+        - "boolean_blind"
+        - "time_blind"
+        - "error_based"
+        - "stacked_queries"
+        - "out_of_band"
+
+      # Database engines to generate payloads for.
+      # "auto" means the AI detects the database from responses/source code.
+      target_databases:
+        - "auto"
+        - "mysql"
+        - "postgresql"
+        - "sqlite"
+        - "mssql"
+        - "oracle"
+
+      # Time-based blind: how many seconds to use in SLEEP/WAITFOR payloads.
+      time_blind_delay_seconds: 5
+
+      # Try to extract actual data once SQLi is confirmed.
+      attempt_data_extraction: true
+
+      # Injection locations to test.
+      injection_points:
+        - "query"
+        - "body"
+        - "header"
+        - "cookie"
+        - "path"
+
+
+  xss:
+    enabled: true
+    description: "Cross-Site Scripting — Execute JavaScript in victim browsers"
+    severity_range:
+      - "high"
+      - "medium"
+    category: "injection"
+    owasp_category: "A03:2021 — Injection"
+    cwe_ids:
+      - 79    # CWE-79: Cross-site Scripting (XSS)
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 2
+    timeout_seconds: 240
+    max_payloads: 40
+    ai_guided: true
+
+    options:
+      techniques:
+        - "reflected"
+        - "stored"
+        - "dom_based"
+
+      # Contexts the AI checks for injection.
+      contexts:
+        - "html_body"
+        - "html_attribute"
+        - "javascript"
+        - "url"
+        - "css"
+
+      # Try to bypass common XSS filters/WAFs.
+      attempt_filter_bypass: true
+
+      # Check for Content-Security-Policy headers.
+      check_csp: true
+
+
+  command_injection:
+    enabled: true
+    description: "OS Command Injection — Execute system commands on the server"
+    severity_range:
+      - "critical"
+    category: "injection"
+    owasp_category: "A03:2021 — Injection"
+    cwe_ids:
+      - 78    # CWE-78: OS Command Injection
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 1
+    timeout_seconds: 180
+    max_payloads: 30
+    ai_guided: true
+
+    options:
+      techniques:
+        - "direct"
+        - "blind_time"
+        - "blind_oob"     # out-of-band (DNS, HTTP callback)
+
+      # Target operating systems for payload generation.
+      target_os:
+        - "linux"
+        - "windows"
+
+      # Separator characters to try.
+      separators:
+        - ";"
+        - "|"
+        - "&&"
+        - "||"
+        - "`"
+        - "$("
+        - "\n"
+
+
+  nosql_injection:
+    enabled: true
+    description: "NoSQL Injection — Bypass authentication or extract data from NoSQL databases"
+    severity_range:
+      - "critical"
+      - "high"
+    category: "injection"
+    owasp_category: "A03:2021 — Injection"
+    cwe_ids:
+      - 943   # CWE-943: Improper Neutralization of Special Elements in Data Query Logic
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 3
+    timeout_seconds: 180
+    max_payloads: 30
+    ai_guided: true
+
+    options:
+      target_databases:
+        - "mongodb"
+        - "couchdb"
+        - "redis"
+
+      techniques:
+        - "operator_injection"     # {"$gt": ""}
+        - "javascript_injection"   # $where clause
+        - "json_injection"
+
+
+  ssti:
+    enabled: true
+    description: "Server-Side Template Injection — Execute code via template engines"
+    severity_range:
+      - "critical"
+      - "high"
+    category: "injection"
+    owasp_category: "A03:2021 — Injection"
+    cwe_ids:
+      - 1336  # CWE-1336: Improper Neutralization of Special Elements Used in a Template Engine
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 3
+    timeout_seconds: 180
+    max_payloads: 25
+    ai_guided: true
+
+    options:
+      # Template engines to generate payloads for.
+      # "auto" means the AI detects the engine from responses/source.
+      target_engines:
+        - "auto"
+        - "jinja2"
+        - "twig"
+        - "freemarker"
+        - "velocity"
+        - "mako"
+        - "pug"
+        - "ejs"
+        - "erb"
+
+      # Polyglot payloads test multiple engines at once.
+      use_polyglot_payloads: true
+
+      # Mathematical detection: {{7*7}} → 49 confirms injection.
+      math_detection: true
+
+
+  header_injection:
+    enabled: true
+    description: "HTTP Header Injection — Inject into response headers (CRLF, Host header)"
+    severity_range:
+      - "medium"
+      - "high"
+    category: "injection"
+    owasp_category: "A03:2021 — Injection"
+    cwe_ids:
+      - 113   # CWE-113: Improper Neutralization of CRLF Sequences in HTTP Headers
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 6
+    timeout_seconds: 120
+    max_payloads: 20
+    ai_guided: true
+
+    options:
+      techniques:
+        - "crlf_injection"
+        - "host_header_injection"
+        - "x_forwarded_for_spoofing"
+
+
+  # ===========================================================================
+  # SERVER-SIDE REQUEST ATTACKS
+  # ===========================================================================
+
+  ssrf:
+    enabled: true
+    description: "Server-Side Request Forgery — Make the server send requests to internal resources"
+    severity_range:
+      - "critical"
+      - "high"
+    category: "server_side"
+    owasp_category: "A10:2021 — Server-Side Request Forgery"
+    cwe_ids:
+      - 918   # CWE-918: Server-Side Request Forgery
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 2
+    timeout_seconds: 240
+    max_payloads: 35
+    ai_guided: true
+
+    options:
+      techniques:
+        - "basic"               # Direct URL injection
+        - "redirect_based"      # Via open redirects
+        - "dns_rebinding"       # DNS rebinding attack
+        - "protocol_smuggling"  # file://, gopher://, dict://
+
+      # Internal targets to attempt reaching.
+      internal_targets:
+        - "http://127.0.0.1"
+        - "http://localhost"
+        - "http://169.254.169.254"    # AWS metadata
+        - "http://metadata.google.internal"  # GCP metadata
+        - "http://100.100.100.200"    # Alibaba Cloud metadata
+        - "http://[::1]"              # IPv6 loopback
+
+      # Cloud metadata endpoints to specifically test.
+      cloud_metadata: true
+
+      # Try filter bypass techniques (URL encoding, IP formats, etc.)
+      attempt_filter_bypass: true
+
+
+  xxe:
+    enabled: true
+    description: "XML External Entity — Read files or trigger SSRF via XML parsing"
+    severity_range:
+      - "critical"
+      - "high"
+    category: "server_side"
+    owasp_category: "A05:2021 — Security Misconfiguration"
+    cwe_ids:
+      - 611   # CWE-611: Improper Restriction of XML External Entity Reference
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 4
+    timeout_seconds: 180
+    max_payloads: 20
+    ai_guided: true
+
+    options:
+      techniques:
+        - "classic"           # <!ENTITY xxe SYSTEM "file:///etc/passwd">
+        - "blind_oob"         # Out-of-band data exfiltration
+        - "parameter_entity"  # % entity tricks
+        - "xinclude"          # XInclude attacks
+
+      # Files to attempt reading when XXE is confirmed.
+      target_files:
+        - "/etc/passwd"
+        - "/etc/hostname"
+        - "C:\\Windows\\win.ini"
+
+
+  # ===========================================================================
+  # AUTHENTICATION & AUTHORIZATION
+  # ===========================================================================
+
+  idor:
+    enabled: true
+    description: "Insecure Direct Object Reference — Access other users' data by changing IDs"
+    severity_range:
+      - "high"
+      - "medium"
+    category: "authorization"
+    owasp_category: "A01:2021 — Broken Access Control"
+    cwe_ids:
+      - 639   # CWE-639: Authorization Bypass Through User-Controlled Key
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 2
+    timeout_seconds: 240
+    max_payloads: 30
+    ai_guided: true
+
+    options:
+      # Types of ID manipulation to attempt.
+      techniques:
+        - "sequential_id"     # id=1 → id=2
+        - "uuid_prediction"   # If UUIDs are predictable
+        - "parameter_swap"    # Swap user_id in request
+
+      # The AI needs at least one valid session to compare responses.
+      requires_authentication: true
+
+
+  auth_bypass:
+    enabled: true
+    description: "Authentication Bypass — Access protected resources without valid credentials"
+    severity_range:
+      - "critical"
+      - "high"
+    category: "authentication"
+    owasp_category: "A07:2021 — Identification and Authentication Failures"
+    cwe_ids:
+      - 287   # CWE-287: Improper Authentication
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 2
+    timeout_seconds: 300
+    max_payloads: 25
+    ai_guided: true
+
+    options:
+      techniques:
+        - "forced_browsing"        # Directly access protected URLs
+        - "method_tampering"       # GET vs POST vs PUT
+        - "parameter_manipulation" # role=admin, is_admin=true
+        - "default_credentials"    # admin/admin, etc.
+        - "registration_abuse"     # Register with admin role
+
+
+  jwt_flaw:
+    enabled: true
+    description: "JWT Vulnerabilities — Exploit weaknesses in JSON Web Token implementations"
+    severity_range:
+      - "critical"
+      - "high"
+    category: "authentication"
+    owasp_category: "A07:2021 — Identification and Authentication Failures"
+    cwe_ids:
+      - 347   # CWE-347: Improper Verification of Cryptographic Signature
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 3
+    timeout_seconds: 180
+    max_payloads: 20
+    ai_guided: true
+
+    options:
+      techniques:
+        - "none_algorithm"    # Change alg to "none"
+        - "alg_confusion"    # RS256 → HS256 with public key as secret
+        - "weak_secret"      # Brute-force weak HMAC secrets
+        - "claim_tampering"  # Modify sub, role, exp claims
+        - "kid_injection"    # Inject via "kid" header parameter
+        - "jku_jwks_spoof"   # Redirect JWK Set URL
+
+      # Common weak secrets to test during brute-force.
+      common_secrets:
+        - "secret"
+        - "password"
+        - "123456"
+        - "your-256-bit-secret"
+
+
+  csrf:
+    enabled: true
+    description: "Cross-Site Request Forgery — Perform actions on behalf of authenticated users"
+    severity_range:
+      - "medium"
+      - "high"
+    category: "authentication"
+    owasp_category: "A01:2021 — Broken Access Control"
+    cwe_ids:
+      - 352   # CWE-352: Cross-Site Request Forgery
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 5
+    timeout_seconds: 120
+    max_payloads: 15
+    ai_guided: true
+
+    options:
+      # Check for existence and validation of CSRF tokens.
+      check_token_presence: true
+      check_token_validation: true
+      check_samesite_cookie: true
+      check_referer_validation: true
+
+
+  # ===========================================================================
+  # FILE & PATH ATTACKS
+  # ===========================================================================
+
+  path_traversal:
+    enabled: true
+    description: "Path Traversal — Read arbitrary files from the server file system"
+    severity_range:
+      - "high"
+      - "critical"
+    category: "file"
+    owasp_category: "A01:2021 — Broken Access Control"
+    cwe_ids:
+      - 22    # CWE-22: Improper Limitation of a Pathname to a Restricted Directory
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 3
+    timeout_seconds: 180
+    max_payloads: 35
+    ai_guided: true
+
+    options:
+      techniques:
+        - "dot_dot_slash"    # ../../../etc/passwd
+        - "null_byte"        # %00 termination
+        - "encoding_bypass"  # Double encoding, UTF-8 tricks
+        - "absolute_path"    # /etc/passwd directly
+
+      target_files:
+        - "/etc/passwd"
+        - "/etc/shadow"
+        - "C:\\Windows\\win.ini"
+        - "C:\\Windows\\System32\\drivers\\etc\\hosts"
+
+
+  file_upload:
+    enabled: true
+    description: "File Upload — Upload malicious files to achieve code execution"
+    severity_range:
+      - "critical"
+      - "high"
+    category: "file"
+    owasp_category: "A04:2021 — Insecure Design"
+    cwe_ids:
+      - 434   # CWE-434: Unrestricted Upload of File with Dangerous Type
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 4
+    timeout_seconds: 180
+    max_payloads: 15
+    ai_guided: true
+
+    options:
+      techniques:
+        - "extension_bypass"   # .php5, .phtml, .php.jpg
+        - "content_type_spoof" # image/jpeg with PHP content
+        - "null_byte_name"     # shell.php%00.jpg
+        - "double_extension"   # shell.php.jpg
+        - "svg_xss"            # SVG with embedded JavaScript
+
+
+  # ===========================================================================
+  # DESERIALIZATION & DATA FORMAT
+  # ===========================================================================
+
+  deserialization:
+    enabled: true
+    description: "Insecure Deserialization — Execute code via malicious serialized objects"
+    severity_range:
+      - "critical"
+    category: "data_format"
+    owasp_category: "A08:2021 — Software and Data Integrity Failures"
+    cwe_ids:
+      - 502   # CWE-502: Deserialization of Untrusted Data
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 4
+    timeout_seconds: 180
+    max_payloads: 15
+    ai_guided: true
+
+    options:
+      target_formats:
+        - "java"       # Java serialized objects
+        - "python"     # pickle
+        - "php"        # PHP serialize/unserialize
+        - "dotnet"     # .NET BinaryFormatter
+        - "ruby"       # Marshal
+        - "node"       # node-serialize
+
+
+  # ===========================================================================
+  # CONFIGURATION & INFORMATION
+  # ===========================================================================
+
+  cors:
+    enabled: true
+    description: "CORS Misconfiguration — Exploit overly permissive cross-origin policies"
+    severity_range:
+      - "medium"
+      - "high"
+    category: "configuration"
+    owasp_category: "A05:2021 — Security Misconfiguration"
+    cwe_ids:
+      - 942   # CWE-942: Permissive Cross-domain Policy with Untrusted Domains
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 5
+    timeout_seconds: 120
+    max_payloads: 15
+    ai_guided: false
+
+    options:
+      # Origins to test in the Origin header.
+      test_origins:
+        - "https://evil.com"
+        - "null"
+        - "https://target.com.evil.com"     # Subdomain trick
+        - "https://targetevilcom"            # Suffix match trick
+
+      check_credentials: true
+      check_wildcard: true
+
+
+  info_disclosure:
+    enabled: true
+    description: "Information Disclosure — Find exposed sensitive data, debug info, stack traces"
+    severity_range:
+      - "low"
+      - "medium"
+      - "info"
+    category: "configuration"
+    owasp_category: "A05:2021 — Security Misconfiguration"
+    cwe_ids:
+      - 200   # CWE-200: Exposure of Sensitive Information
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 7
+    timeout_seconds: 120
+    max_payloads: 20
+    ai_guided: false
+
+    options:
+      # Paths to check for exposed sensitive files/pages.
+      sensitive_paths:
+        - "/.env"
+        - "/.git/config"
+        - "/robots.txt"
+        - "/sitemap.xml"
+        - "/.DS_Store"
+        - "/wp-config.php"
+        - "/server-status"
+        - "/server-info"
+        - "/phpinfo.php"
+        - "/.well-known/security.txt"
+        - "/api/swagger.json"
+        - "/api/docs"
+        - "/graphql"
+        - "/debug"
+        - "/trace"
+        - "/actuator"
+        - "/actuator/env"
+        - "/actuator/health"
+
+      # Check for sensitive data in response headers.
+      check_headers:
+        - "Server"
+        - "X-Powered-By"
+        - "X-Debug-Token"
+        - "X-AspNet-Version"
+
+      # Check for stack traces in error responses.
+      check_error_pages: true
+
+
+  misconfig:
+    enabled: true
+    description: "Security Misconfiguration — Missing headers, verbose errors, default configs"
+    severity_range:
+      - "low"
+      - "medium"
+    category: "configuration"
+    owasp_category: "A05:2021 — Security Misconfiguration"
+    cwe_ids:
+      - 16    # CWE-16: Configuration
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 8
+    timeout_seconds: 120
+    max_payloads: 10
+    ai_guided: false
+
+    options:
+      # Security headers that SHOULD be present.
+      required_headers:
+        - "Strict-Transport-Security"
+        - "X-Content-Type-Options"
+        - "X-Frame-Options"
+        - "Content-Security-Policy"
+        - "Referrer-Policy"
+        - "Permissions-Policy"
+
+      # Check for insecure cookie settings.
+      check_cookie_flags: true
+
+      # Check for HTTP methods that should be disabled.
+      dangerous_methods:
+        - "TRACE"
+        - "OPTIONS"
+        - "PUT"
+        - "DELETE"
+
+
+  # ===========================================================================
+  # ADVANCED / LOGIC ATTACKS
+  # ===========================================================================
+
+  race_condition:
+    enabled: true
+    description: "Race Condition — Exploit time-of-check/time-of-use flaws"
+    severity_range:
+      - "high"
+      - "medium"
+    category: "logic"
+    owasp_category: "A04:2021 — Insecure Design"
+    cwe_ids:
+      - 362   # CWE-362: Race Condition
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 6
+    timeout_seconds: 180
+    max_payloads: 10
+    ai_guided: true
+
+    options:
+      # Number of concurrent identical requests to send.
+      concurrent_requests: 20
+
+      # Targets: endpoints dealing with money, inventory, votes, etc.
+      # The AI identifies these from context.
+      ai_target_selection: true
+
+
+  business_logic:
+    enabled: true
+    description: "Business Logic Flaws — Exploit flawed application workflows"
+    severity_range:
+      - "high"
+      - "medium"
+      - "critical"
+    category: "logic"
+    owasp_category: "A04:2021 — Insecure Design"
+    cwe_ids:
+      - 840   # CWE-840: Business Logic Errors
+    applicable_to:
+      - "whitebox"
+      - "full"
+    requires_source: true
+    default_priority: 5
+    timeout_seconds: 300
+    max_payloads: 10
+    ai_guided: true
+
+    options:
+      # Business logic attacks are almost entirely AI-driven.
+      # The AI reads source code to understand workflows and finds flaws.
+      techniques:
+        - "workflow_bypass"      # Skip steps in multi-step processes
+        - "price_manipulation"   # Negative quantities, decimal tricks
+        - "privilege_escalation" # Horizontal and vertical
+        - "rate_limit_bypass"    # Bypass attempt counters
+
+
+  # ===========================================================================
+  # API-SPECIFIC ATTACKS
+  # ===========================================================================
+
+  graphql:
+    enabled: true
+    description: "GraphQL Vulnerabilities — Introspection, injection, DoS via nested queries"
+    severity_range:
+      - "medium"
+      - "high"
+    category: "api"
+    owasp_category: "A03:2021 — Injection"
+    cwe_ids:
+      - 200   # CWE-200: Information Exposure
+      - 400   # CWE-400: Uncontrolled Resource Consumption
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 4
+    timeout_seconds: 180
+    max_payloads: 20
+    ai_guided: true
+
+    options:
+      techniques:
+        - "introspection"      # Schema extraction
+        - "nested_query_dos"   # Deeply nested queries
+        - "batch_attack"       # Array of queries
+        - "injection"          # SQLi/NoSQLi via GraphQL variables
+        - "field_suggestion"   # Abuse auto-suggest to enumerate fields
+
+
+  websocket:
+    enabled: true
+    description: "WebSocket Vulnerabilities — Injection and hijacking via WebSocket connections"
+    severity_range:
+      - "medium"
+      - "high"
+    category: "api"
+    owasp_category: "A03:2021 — Injection"
+    cwe_ids:
+      - 1385  # CWE-1385: Missing Origin Validation in WebSockets
+    applicable_to:
+      - "blackbox"
+      - "whitebox"
+      - "full"
+    requires_source: false
+    default_priority: 7
+    timeout_seconds: 120
+    max_payloads: 15
+    ai_guided: true
+
+    options:
+      techniques:
+        - "cross_site_hijacking"  # CSWSH
+        - "message_injection"     # SQLi/XSS via WS messages
+        - "origin_check"          # Missing origin validation

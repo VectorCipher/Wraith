@@ -12,22 +12,6 @@ Responsibilities:
     - Report model status for CLI display
     - Track which models are warm (loaded in memory) vs cold
 
-Usage:
-    from llm import LLMClient, ModelManager
-
-    client = LLMClient()
-    manager = ModelManager(client)
-
-    # Check everything is ready
-    status = await manager.verify_models()
-    if status.all_ready:
-        print("All models are available!")
-    else:
-        print(f"Missing models: {status.missing}")
-
-    # Get detailed status for CLI banner
-    for model in status.models:
-        print(f"{model.name}: {model.status}")
 """
 
 from enum import Enum

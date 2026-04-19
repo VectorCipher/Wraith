@@ -18,28 +18,6 @@ Responsibilities:
     - Manage conversation history for multi-turn interactions
     - Enforce context window limits (truncation when needed)
     - Format prompts for structured output parsing (JSON, lists, etc.)
-
-Usage:
-    from llm.prompt_engine import PromptEngine
-
-    engine = PromptEngine()
-
-    # Build a reconnaissance prompt
-    prompt = engine.build_recon_prompt(target)
-
-    # Build an attack planning prompt with context
-    prompt = engine.build_attack_plan_prompt(
-        target=target,
-        findings=existing_findings,
-        phase="exploitation",
-    )
-
-    # Build a code analysis prompt
-    prompt = engine.build_code_analysis_prompt(
-        source_code=code,
-        file_path="app/routes/users.py",
-        language="python",
-    )
 """
 
 from typing import Any

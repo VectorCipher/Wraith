@@ -14,30 +14,6 @@ Supports:
     - Token usage and performance tracking
     - Chain-of-thought extraction (<think> tag parsing)
     - Structured LLMResponse output
-
-Usage:
-    client = LLMClient()
-
-    # Simple generation with a role
-    response = await client.generate(
-        role="reasoning",
-        prompt="Analyze this endpoint for SQL injection vectors...",
-    )
-    print(response.content)
-
-    # Chat with message history
-    response = await client.chat(
-        role="coding",
-        messages=[
-            {"role": "user", "content": "Find SQLi sinks in this code..."}
-        ],
-    )
-
-    # Streaming for real-time CLI display
-    async for chunk in client.generate_stream(
-        role="reasoning", prompt="Plan an attack strategy..."
-    ):
-        print(chunk, end="", flush=True)
 """
 
 import re

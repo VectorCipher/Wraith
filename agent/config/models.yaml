@@ -22,7 +22,7 @@
 # Default model to use when a specific role isn't needed
 # (e.g., general-purpose queries that don't fit reasoning or coding)
 # -----------------------------------------------------------------------------
-default_model: "nemotron-cascade-2:latest"
+default_model: "deepseek-r1:8b"
 
 
 # -----------------------------------------------------------------------------
@@ -43,7 +43,7 @@ models:
   #   - Decision-making (what to test next)
   # ---------------------------------------------------------------------------
   reasoning:
-    model_name: "nemotron-cascade-2:latest"
+    model_name: "deepseek-r1:8b"
     description: "Strategic reasoning, planning, and analysis"
 
     # Temperature controls randomness:
@@ -194,7 +194,7 @@ presets:
 
   # For machines with 32GB+ RAM and a strong GPU
   performance:
-    reasoning: "nemotron-cascade-2:latest"
+    reasoning: "deepseek-r1:8b"
     coding: "qwen2.5-coder:14b"
 
   # For machines with 16GB RAM
@@ -204,7 +204,7 @@ presets:
 
   # For machines with 8GB RAM or no GPU
   lightweight:
-    reasoning: "llama3.2:3b"
+    reasoning: "deepseek-r1:8b"
     coding: "qwen2.5-coder:3b"
 
 

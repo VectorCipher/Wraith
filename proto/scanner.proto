@@ -1,0 +1,441 @@
+// =============================================================================
+// WRAITH — Scanner Service gRPC Protocol Definition
+// =============================================================================
+//
+// This file defines the COMPLETE communication contract between:
+//   - Python AI Agent (gRPC CLIENT) — the brain, decides WHAT to attack
+//   - Go Scanner     (gRPC SERVER) — the engine, executes attacks FAST
+//
+// Data Flow:
+//   Python Brain → AttackRequest → gRPC → Go Scanner → HTTP Attacks → Target
+//                                                    ↓
+//   Python Brain ← AttackResult  ← gRPC ← Go Scanner ← HTTP Responses ← Target
+//
+// Why gRPC instead of REST:
+//   1. Binary protocol (protobuf) — 10x smaller than JSON
+//   2. Streaming — Go can stream PayloadResults back as they arrive
+//   3. Strong typing — contract enforced at compile time
+//   4. HTTP/2 — multiplexed, bidirectional, efficient
+//   5. Code generation — client/server stubs auto-generated
+//
+// Build Commands:
+//   Python (from project root):
+//     python -m grpc_tools.protoc \
+//       -I proto/ \
+//       --python_out=agent/scanner_client/ \
+//       --grpc_python_out=agent/scanner_client/ \
+//       proto/scanner.proto
+//
+//   Go (from project root):
+//     protoc \
+//       -I proto/ \
+//       --go_out=scanner/proto --go_opt=paths=source_relative \
+//       --go-grpc_out=scanner/proto --go-grpc_opt=paths=source_relative \
+//       proto/scanner.proto
+//
+// =============================================================================
+
+syntax = "proto3";
+
+package wraith.scanner;
+
+option go_package = "github.com/VectorCipher/Wraith/blob/main/scanner/proto";
+
+
+// =============================================================================
+// SCANNER SERVICE — The Main gRPC Interface
+// =============================================================================
+//
+// This service defines ALL operations the Python agent can request
+// from the Go scanner. Each RPC maps to a specific scan phase.
+//
+// RPC Types Used:
+//   Unary        → Simple request/response (health checks, single scans)
+//   Server-stream → Go streams results back (attack execution, crawling)
+//   Bidirectional → Both sides stream (future: interactive scanning)
+//
+// =============================================================================
+
+service ScannerService {
+
+  // -------------------------------------------------------------------------
+  // Health & Status
+  // -------------------------------------------------------------------------
+
+  // Quick health check — is the scanner alive and ready?
+  // Called at WRAITH startup before any scanning begins.
+  // Python: verification = await scanner.HealthCheck(empty)
+  rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
+
+  // Get scanner capabilities and resource usage.
+  // Used by CLI to display scanner status.
+  rpc GetStatus (StatusRequest) returns (StatusResponse);
+
+
+  // -------------------------------------------------------------------------
+  // Attack Execution (Core Operations)
+  // -------------------------------------------------------------------------
+
+  // Execute a single attack — send payloads, get results.
+  // Unary RPC: Python sends AttackRequest, waits for complete AttackResult.
+  // Use for small payload sets (<50 payloads) where streaming isn't needed.
+  rpc ExecuteAttack (AttackRequest) returns (AttackResult);
+
+  // Execute an attack with STREAMING results.
+  // Server-streaming RPC: Go sends PayloadResults back ONE BY ONE
+  // as each payload completes. Python can display results in real-time.
+  // Use for large payload sets where real-time feedback matters.
+  rpc ExecuteAttackStream (AttackRequest) returns (stream PayloadResult);
+
+  // Execute MULTIPLE attacks as a batch.
+  // Client-streaming RPC: Python sends multiple AttackRequests,
+  // Go executes them all and returns a combined result.
+  // Use for parallel attack execution across multiple endpoints.
+  rpc ExecuteAttackBatch (stream AttackRequest) returns (BatchAttackResult);
+
+
+  // -------------------------------------------------------------------------
+  // Reconnaissance Operations
+  // -------------------------------------------------------------------------
+
+  // Crawl a target website to discover endpoints, forms, and links.
+  // Server-streaming: Go streams discovered URLs back in real-time.
+  // Python AI can analyze them as they arrive and adjust strategy.
+  rpc CrawlTarget (CrawlRequest) returns (stream CrawlResult);
+
+  // Fingerprint the target's technology stack via HTTP probing.
+  // Sends targeted requests and analyzes responses for tech signatures.
+  rpc FingerprintTarget (FingerprintRequest) returns (FingerprintResult);
+
+  // Send a baseline HTTP request to establish "normal" response.
+  // Used for comparison during attack analysis (detect anomalies).
+  rpc SendBaselineRequest (BaselineRequest) returns (BaselineResponse);
+
+
+  // -------------------------------------------------------------------------
+  // Utility Operations
+  // -------------------------------------------------------------------------
+
+  // Send a raw HTTP request through the scanner.
+  // Used for custom probing, validation, or follow-up requests.
+  rpc SendRawRequest (RawHTTPRequest) returns (RawHTTPResponse);
+
+  // Stop all running attacks immediately.
+  // Called when user presses Ctrl+C or scan is aborted.
+  rpc AbortAll (AbortRequest) returns (AbortResponse);
+}
+
+
+// =============================================================================
+// MESSAGE DEFINITIONS — Health & Status
+// =============================================================================
+
+message HealthCheckRequest {
+  // Optional: include a ping payload to verify round-trip
+  string ping = 1;
+}
+
+message HealthCheckResponse {
+  bool healthy = 1;
+  string version = 2;
+  string pong = 3;               // Echo back the ping payload
+  int64 uptime_seconds = 4;
+  int32 active_attacks = 5;      // Number of currently running attacks
+}
+
+message StatusRequest {}
+
+message StatusResponse {
+  bool ready = 1;
+  string version = 2;
+  int64 uptime_seconds = 3;
+
+  // Resource usage
+  int32 active_goroutines = 4;   // Go's lightweight threads
+  int64 memory_used_bytes = 5;
+  int32 active_attacks = 6;
+  int64 total_requests_sent = 7;
+  int64 total_attacks_completed = 8;
+
+  // Configuration
+  int32 max_concurrent_requests = 9;
+  int32 rate_limit_per_second = 10;
+  int32 request_timeout_seconds = 11;
+}
+
+
+// =============================================================================
+// MESSAGE DEFINITIONS — Attack Execution
+// =============================================================================
+//
+// These messages mirror the Pydantic models in agent/models/attack_result.py:
+//   AttackRequest  ↔ models.AttackRequest
+//   PayloadResult  ↔ models.PayloadResult
+//   AttackResult   ↔ models.AttackResult
+//
+// The Python gRPC client (Step 8) will convert between proto and Pydantic.
+// =============================================================================
+
+message AttackRequest {
+  // --- Identity ---
+  string attack_id = 1;          // Unique ID for this attack run
+  string attack_type = 2;        // "sqli", "xss", "ssrf", etc.
+
+  // --- Target ---
+  string target_url = 3;         // Full URL (e.g. "http://localhost:5000/api/login")
+  string method = 4;             // HTTP method: GET, POST, PUT, DELETE, PATCH
+  string path = 5;               // URL path only (e.g. "/api/login")
+
+  // --- Payloads ---
+  repeated string payloads = 6;  // List of attack payloads to inject
+
+  // --- Injection Configuration ---
+  string injection_point = 7;    // Where to inject: "query", "body", "header",
+                                 // "cookie", "path", "json_body"
+  string parameter_name = 8;     // Which parameter to inject into (e.g. "username")
+
+  // --- HTTP Request Details ---
+  map<string, string> headers = 9;    // Custom HTTP headers
+  string body = 10;                   // Request body template (for POST/PUT)
+  map<string, string> cookies = 11;   // Cookies to include
+  string content_type = 12;           // Content-Type header value
+
+  // --- Behavior ---
+  int32 timeout_seconds = 13;         // Per-request timeout (default: 30)
+  bool follow_redirects = 14;         // Follow HTTP 3xx redirects?
+  int32 max_concurrent = 15;          // Max parallel requests for THIS attack
+  int32 delay_between_ms = 16;        // Delay between payloads (rate limiting)
+  int32 max_retries = 17;             // Retry failed requests N times
+
+  // --- Baseline ---
+  string baseline_response_body = 18; // Normal response body for comparison
+  int32 baseline_status_code = 19;    // Normal response status code
+  int64 baseline_content_length = 20; // Normal response content length
+
+  // --- Authentication ---
+  string auth_token = 21;             // Bearer/JWT token for authenticated testing
+  string auth_header_name = 22;       // Header name for auth (default: "Authorization")
+}
+
+
+message PayloadResult {
+  // --- Payload Info ---
+  string payload = 1;            // The exact payload that was sent
+  int32 payload_index = 2;       // Index in the original payload list (0-based)
+
+  // --- Response ---
+  int32 status_code = 3;         // HTTP status code (200, 500, 403, etc.)
+  string response_body = 4;      // Response body (may be truncated for large responses)
+  map<string, string> response_headers = 5;  // Response headers
+  int64 content_length = 6;      // Response body size in bytes
+  string content_type = 7;       // Response Content-Type
+
+  // --- Timing ---
+  double response_time_ms = 8;   // Time from request sent to response received
+
+  // --- Metadata ---
+  string error = 9;              // Error message if request failed (empty = success)
+  bool redirected = 10;          // Whether the request was redirected
+  string final_url = 11;         // URL after redirects (if any)
+
+  // --- Body Truncation ---
+  bool body_truncated = 12;      // True if response_body was truncated
+  int64 original_body_length = 13; // Full body length before truncation
+}
+
+
+message AttackResult {
+  // --- Identity ---
+  string attack_id = 1;          // Matches the AttackRequest.attack_id
+  string attack_type = 2;        // Matches the AttackRequest.attack_type
+
+  // --- Status ---
+  //   "success"  = attack ran to completion
+  //   "failed"   = attack couldn't execute
+  //   "timeout"  = overall attack timed out
+  //   "blocked"  = target blocked our requests (WAF)
+  //   "error"    = unexpected error
+  //   "aborted"  = user cancelled
+  string status = 3;
+
+  // --- Results ---
+  repeated PayloadResult payload_results = 4;  // One per payload sent
+
+  // --- Statistics ---
+  int32 total_requests = 5;      // Total HTTP requests sent
+  int32 successful_requests = 6; // Requests that got a response
+  int32 failed_requests = 7;     // Requests that errored
+  double duration_ms = 8;        // Total attack execution time
+  double avg_response_time_ms = 9; // Average response time
+
+  // --- Error ---
+  string error = 10;             // Error message if status != "success"
+}
+
+
+message BatchAttackResult {
+  repeated AttackResult results = 1;
+  int32 total_attacks = 2;
+  int32 successful_attacks = 3;
+  int32 failed_attacks = 4;
+  double total_duration_ms = 5;
+}
+
+
+// =============================================================================
+// MESSAGE DEFINITIONS — Reconnaissance
+// =============================================================================
+
+message CrawlRequest {
+  string target_url = 1;         // Starting URL to crawl from
+  int32 max_depth = 2;           // Maximum link-following depth (default: 3)
+  int32 max_pages = 3;           // Maximum pages to visit (default: 100)
+  int32 timeout_seconds = 4;     // Overall crawl timeout
+  int32 delay_between_ms = 5;    // Delay between requests (be polite)
+  bool respect_robots_txt = 6;   // Obey robots.txt? (default: false for pentest)
+  repeated string exclude_patterns = 7;  // URL patterns to skip (regex)
+  map<string, string> headers = 8;       // Custom headers for crawl requests
+  map<string, string> cookies = 9;       // Cookies for authenticated crawling
+}
+
+
+message CrawlResult {
+  // --- Discovered URL ---
+  string url = 1;                // Full URL discovered
+  string method = 2;             // HTTP method for this URL (GET/POST)
+  int32 status_code = 3;         // Response status code
+  int32 depth = 4;               // How many links deep from starting URL
+
+  // --- Page Content Analysis ---
+  repeated FormData forms = 5;          // HTML forms found on this page
+  repeated string links = 6;            // Outbound links found
+  repeated string scripts = 7;          // JavaScript file URLs
+  repeated string api_endpoints = 8;    // Detected API endpoints
+
+  // --- Tech Detection ---
+  repeated string detected_tech = 9;    // Technologies detected on this page
+  map<string, string> response_headers = 10; // Headers (for tech fingerprinting)
+
+  // --- Metadata ---
+  string page_title = 11;
+  string content_type = 12;
+  int64 content_length = 13;
+  double response_time_ms = 14;
+  string error = 15;             // Empty if successful
+}
+
+
+message FormData {
+  string action = 1;             // Form action URL
+  string method = 2;             // Form method (GET/POST)
+  string enctype = 3;            // Encoding type (e.g. "multipart/form-data")
+  repeated FormField fields = 4; // Form input fields
+}
+
+
+message FormField {
+  string name = 1;               // Field name
+  string field_type = 2;         // "text", "password", "hidden", "file", etc.
+  string value = 3;              // Default value (if any)
+  bool required = 4;             // Is the field required?
+}
+
+
+message FingerprintRequest {
+  string target_url = 1;
+  map<string, string> headers = 2;
+  map<string, string> cookies = 3;
+  int32 timeout_seconds = 4;
+}
+
+
+message FingerprintResult {
+  // --- Detected Stack ---
+  string language = 1;           // "python", "javascript", "php", etc.
+  string framework = 2;          // "flask", "express", "laravel", etc.
+  string web_server = 3;         // "nginx", "apache", "gunicorn", etc.
+  string database = 4;           // "postgresql", "mysql", "mongodb", etc.
+  string template_engine = 5;    // "jinja2", "ejs", "blade", etc.
+  string auth_mechanism = 6;     // "jwt", "session", "basic", etc.
+  repeated string other_tech = 7; // Additional tech detected
+
+  // --- Detection Confidence ---
+  map<string, float> confidence_scores = 8; // tech_name → confidence (0.0-1.0)
+
+  // --- Raw Evidence ---
+  map<string, string> response_headers = 9;   // Server headers collected
+  repeated string detected_cookies = 10;       // Cookie names found
+  repeated string error_signatures = 11;       // Error message patterns
+
+  // --- Metadata ---
+  int32 requests_sent = 12;
+  double duration_ms = 13;
+  string error = 14;
+}
+
+
+// =============================================================================
+// MESSAGE DEFINITIONS — Baseline & Raw Requests
+// =============================================================================
+
+message BaselineRequest {
+  string url = 1;                // URL to send baseline request to
+  string method = 2;             // HTTP method
+  map<string, string> headers = 3;
+  string body = 4;               // Request body (for POST)
+  map<string, string> cookies = 5;
+  int32 timeout_seconds = 6;
+}
+
+
+message BaselineResponse {
+  int32 status_code = 1;
+  string body = 2;
+  map<string, string> headers = 3;
+  int64 content_length = 4;
+  double response_time_ms = 5;
+  string content_type = 6;
+  string error = 7;
+}
+
+
+message RawHTTPRequest {
+  string url = 1;
+  string method = 2;
+  map<string, string> headers = 3;
+  string body = 4;
+  map<string, string> cookies = 5;
+  int32 timeout_seconds = 6;
+  bool follow_redirects = 7;
+}
+
+
+message RawHTTPResponse {
+  int32 status_code = 1;
+  string body = 2;
+  map<string, string> headers = 3;
+  int64 content_length = 4;
+  double response_time_ms = 5;
+  string content_type = 6;
+  bool redirected = 7;
+  string final_url = 8;
+  string error = 9;
+}
+
+
+// =============================================================================
+// MESSAGE DEFINITIONS — Control
+// =============================================================================
+
+message AbortRequest {
+  string reason = 1;             // Why aborting (for logging)
+  bool force = 2;                // Force-kill even in-flight requests?
+}
+
+
+message AbortResponse {
+  bool success = 1;
+  int32 attacks_aborted = 2;     // Number of attacks that were stopped
+  int32 requests_cancelled = 3;  // Number of in-flight requests cancelled
+  string message = 4;
+}

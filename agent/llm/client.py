@@ -1,21 +1,3 @@
-"""
-WRAITH LLM Client
-
-Core module for communicating with the Ollama inference server.
-This is the ONLY module that makes HTTP calls to Ollama.
-All other modules use this client to access LLM capabilities.
-
-Supports:
-    - Dual-model architecture (reasoning + coding roles)
-    - Model-agnostic design (model names from config, never hardcoded)
-    - Async non-blocking I/O via Ollama's AsyncClient
-    - Streaming responses for real-time CLI output
-    - Automatic system prompt injection from models.yaml
-    - Token usage and performance tracking
-    - Chain-of-thought extraction (<think> tag parsing)
-    - Structured LLMResponse output
-"""
-
 import re
 import time
 from typing import AsyncGenerator
@@ -51,20 +33,11 @@ class LLMResponse(BaseModel):
     Wraps raw Ollama output into a clean, typed object
     that the rest of the application can work with.
 
-    Attributes:
-        content: The main generated text (thinking tags removed).
-        model: Name of the model that produced this response.
-        role: Role used for the request ("reasoning" or "coding").
-        thinking: Chain-of-thought content extracted from <think> tags.
-        total_duration_ms: Total wall-clock time for the request.
-        prompt_tokens: Number of tokens in the input prompt.
-        completion_tokens: Number of tokens generated.
-        tokens_per_second: Generation speed.
     """
 
     content: str = ""
     model: str = ""
-    role: str = ""
+    role: str = ""         # Task role used — "reasoning" or "coding"
     thinking: str | None = None
     total_duration_ms: float = 0.0
     prompt_tokens: int = 0
@@ -111,18 +84,6 @@ class LLMClient:
     This class is the single gateway to ALL LLM operations in WRAITH.
     It reads model configuration from models.yaml via get_model_config(),
     ensuring model names and parameters are never hardcoded.
-
-    Lifecycle:
-        client = LLMClient()
-        # ... use client ...
-        await client.close()
-
-    Attributes:
-        _client: Ollama AsyncClient instance.
-        _host: Ollama server URL (e.g. "http://localhost:11434").
-        _timeout: Request timeout in seconds.
-        _total_requests: Running count of all LLM requests made.
-        _total_tokens_used: Running count of all tokens consumed.
     """
 
     def __init__(
@@ -173,23 +134,6 @@ class LLMClient:
         Uses Ollama's /api/generate endpoint. The model is selected
         based on the role ("reasoning" or "coding") from models.yaml.
 
-        Args:
-            role: Model role — "reasoning", "coding", or a direct model name.
-            prompt: The user prompt to send.
-            system_prompt: Override the default system prompt from models.yaml.
-                          If None, uses the system prompt from config.
-            temperature: Override the config temperature for this call.
-            max_tokens: Override max output tokens for this call.
-            context: Previous conversation context (Ollama context array).
-            raw: If True, skip Ollama's template formatting.
-
-        Returns:
-            LLMResponse with the generated content and metadata.
-
-        Raises:
-            LLMConnectionError: Cannot reach Ollama server.
-            ModelNotFoundError: Model is not pulled in Ollama.
-            WraithError: Other LLM-related errors.
         """
         model_config = self._get_model_config(role)
         model_name = model_config["model_name"]
@@ -240,21 +184,6 @@ class LLMClient:
         Uses Ollama's /api/chat endpoint. Supports multi-turn
         conversations with message history.
 
-        Args:
-            role: Model role — "reasoning", "coding", or a direct model name.
-            messages: List of message dicts with "role" and "content" keys.
-                     Example: [{"role": "user", "content": "Find vulns..."}]
-            system_prompt: Override the default system prompt.
-            temperature: Override the config temperature.
-            max_tokens: Override max output tokens.
-
-        Returns:
-            LLMResponse with the generated content and metadata.
-
-        Raises:
-            LLMConnectionError: Cannot reach Ollama server.
-            ModelNotFoundError: Model is not pulled in Ollama.
-            WraithError: Other LLM-related errors.
         """
         model_config = self._get_model_config(role)
         model_name = model_config["model_name"]
@@ -304,19 +233,6 @@ class LLMClient:
         Used by the CLI to display LLM output in real-time as it's
         generated. Yields content strings as they arrive from Ollama.
 
-        Args:
-            role: Model role — "reasoning" or "coding".
-            prompt: The user prompt to send.
-            system_prompt: Override the default system prompt.
-            temperature: Override the config temperature.
-            max_tokens: Override max output tokens.
-
-        Yields:
-            String chunks of the generated response.
-
-        Raises:
-            LLMConnectionError: Cannot reach Ollama server.
-            ModelNotFoundError: Model is not pulled in Ollama.
         """
         model_config = self._get_model_config(role)
         model_name = model_config["model_name"]
@@ -360,19 +276,6 @@ class LLMClient:
         """
         Stream a chat response token-by-token from /api/chat.
 
-        Args:
-            role: Model role — "reasoning" or "coding".
-            messages: Chat message history.
-            system_prompt: Override the default system prompt.
-            temperature: Override temperature.
-            max_tokens: Override max tokens.
-
-        Yields:
-            String chunks of the generated response.
-
-        Raises:
-            LLMConnectionError: Cannot reach Ollama server.
-            ModelNotFoundError: Model is not pulled in Ollama.
         """
         model_config = self._get_model_config(role)
         model_name = model_config["model_name"]
@@ -488,15 +391,6 @@ class LLMClient:
         """
         Get detailed information about a specific model.
 
-        Args:
-            model_name: Full model name.
-
-        Returns:
-            Dict with model details (parameters, template, size, etc.)
-
-        Raises:
-            ModelNotFoundError: Model is not available.
-            LLMConnectionError: Cannot reach Ollama.
         """
         try:
             info = await self._client.show(model_name)
@@ -704,13 +598,6 @@ class LLMClient:
         Handles both dict-style and object-style responses from
         different versions of the Ollama Python library.
 
-        Args:
-            raw_response: Raw response from Ollama.
-            role: The role used for the request.
-            elapsed_ms: Wall-clock time for the request.
-
-        Returns:
-            Parsed LLMResponse object.
         """
         # Extract raw text
         raw_text = self._safe_get(raw_response, "response", "")
@@ -762,13 +649,6 @@ class LLMClient:
 
         The chat endpoint nests the content inside a "message" field.
 
-        Args:
-            raw_response: Raw response from Ollama.
-            role: The role used for the request.
-            elapsed_ms: Wall-clock time for the request.
-
-        Returns:
-            Parsed LLMResponse object.
         """
         # Chat responses nest content inside "message"
         message = self._safe_get(raw_response, "message", {})
@@ -816,25 +696,6 @@ class LLMClient:
         """
         Extract chain-of-thought content from <think> tags.
 
-        Models like Nemotron-Cascade and DeepSeek-R1 wrap their
-        reasoning process inside <think>...</think> tags:
-
-            <think>
-            The user wants me to analyze SQL injection.
-            The endpoint uses string concatenation...
-            </think>
-
-            Based on my analysis, this endpoint is vulnerable to
-            SQL injection because...
-
-        This method separates the thinking from the final answer.
-
-        Args:
-            raw_text: Raw text from the model response.
-
-        Returns:
-            Tuple of (thinking_content, clean_content).
-            thinking_content is None if no <think> tags found.
         """
         if not raw_text:
             return None, ""
@@ -886,14 +747,6 @@ class LLMClient:
         raises the appropriate WraithError subclass with helpful
         guidance for the user.
 
-        Args:
-            error: The raw exception from Ollama.
-            model_name: The model that was being used.
-
-        Raises:
-            ModelNotFoundError: Model is not pulled.
-            LLMConnectionError: Server unreachable.
-            WraithError: Other LLM errors.
         """
         error_str = str(error).lower()
 
@@ -945,8 +798,8 @@ class LLMClient:
             raise WraithError(
                 message=f"Model '{model_name}' requires more memory than available",
                 details=(
-                    f"Try a smaller model. Update REASONING_MODEL or CODING_MODEL in .env\n"
-                    f"Smaller alternatives: qwen2.5:7b, llama3.2:3b\n"
+                    f"Try a smaller model. Update MODEL= in .env\n"
+                    f"Smaller alternatives: qwen3.5:4b, qwen2.5:7b, llama3.2:3b\n"
                     f"Error: {error}"
                 ),
             )

@@ -28,8 +28,8 @@ import grpc
 # Ensure generated stubs are importable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import scanner_pb2 as pb          # noqa: E402
-import scanner_pb2_grpc as pb_grpc  # noqa: E402
+import scanner_pb2 as pb          
+import scanner_pb2_grpc as pb_grpc  
 
 from config import settings
 from utils.exception import ScannerConnectionError

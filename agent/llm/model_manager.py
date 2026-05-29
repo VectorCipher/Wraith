@@ -2,15 +2,12 @@
 WRAITH Model Manager
 
 Manages LLM model lifecycle, health checking, and availability verification.
-This module ensures that all required models are pulled, healthy, and ready
+This module ensures that the configured model is pulled, healthy, and ready
 before WRAITH starts a scan.
 
-Responsibilities:
-    - Verify required models are available in Ollama
-    - Check model health (can it actually generate responses?)
-    - Pull missing models automatically (with user consent)
-    - Report model status for CLI display
-    - Track which models are warm (loaded in memory) vs cold
+WRAITH uses a SINGLE-MODEL architecture: one model handles all tasks,
+with role-specific system prompts providing specialised behaviour.
+The model is configured via MODEL= in .env (or the default in settings.py).
 
 """
 
@@ -186,7 +183,8 @@ class ModelManager:
         _required_roles: Model roles that WRAITH needs to function.
     """
 
-    # The roles WRAITH requires to operate
+    # The task roles WRAITH uses internally.
+    # Both map to the SAME model — they differ only in system prompt / params.
     REQUIRED_ROLES: list[str] = ["reasoning", "coding"]
 
     def __init__(self, client: "LLMClient") -> None:
@@ -714,16 +712,12 @@ class ModelManager:
         try:
             return get_model_config(role)
         except ConfigurationError:
-            # Fallback: use model name from settings
-            fallback_name = ""
-            if role == "reasoning":
-                fallback_name = settings.reasoning_model
-            elif role == "coding":
-                fallback_name = settings.coding_model
+            # Fallback: use the single model name from settings
+            fallback_name = settings.model
 
             logger.warning(
                 f"Role '{role}' not in models.yaml — "
-                f"falling back to settings: {fallback_name}"
+                f"falling back to settings.model: {fallback_name}"
             )
 
             return {

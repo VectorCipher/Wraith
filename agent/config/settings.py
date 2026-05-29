@@ -61,8 +61,8 @@ class WraithSettings(BaseSettings):
     # without editing YAML.
     # -------------------------------------------------------------------
     model: str = Field(
-        default = "qwen3.5:9b",
-        description = "Ollama model name for reasoning/strategy tasks",
+        default="qwen3.5:9b",
+        description="Ollama model name used for all AI tasks (reasoning + coding)",
     )
 
     # -------------------------------------------------------------------

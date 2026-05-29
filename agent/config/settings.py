@@ -60,13 +60,9 @@ class WraithSettings(BaseSettings):
     # get_model_config(). These env vars let you override the model NAME
     # without editing YAML.
     # -------------------------------------------------------------------
-    reasoning_model: str = Field(
-        default="nemotron-cascade-2:latest",
-        description="Ollama model name for reasoning/strategy tasks",
-    )
-    coding_model: str = Field(
-        default="qwen2.5-coder:14b",
-        description="Ollama model name for code analysis/generation tasks",
+    model: str = Field(
+        default = "qwen3.5:9b",
+        description = "Ollama model name for reasoning/strategy tasks",
     )
 
     # -------------------------------------------------------------------
@@ -270,8 +266,7 @@ class WraithSettings(BaseSettings):
         return {
             "Ollama Host": self.ollama_host,
             "Ollama Timeout": f"{self.ollama_timeout}s",
-            "Reasoning Model": self.reasoning_model,
-            "Coding Model": self.coding_model,
+            "Model": self.model,
             "Scanner gRPC": self.scanner_grpc_address,
             "Rate Limit": f"{self.scan_rate_limit} req/s",
             "Concurrency": str(self.max_concurrent_requests),
@@ -296,7 +291,7 @@ try:
     settings = WraithSettings()
     logger.debug(
         f"Settings loaded — Ollama: {settings.ollama_host}, "
-        f"Models: {settings.reasoning_model} / {settings.coding_model}"
+        f"Model: {settings.model}"
     )
 except Exception as e:
     # If settings fail to load, this is a fatal configuration error.

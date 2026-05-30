@@ -24,7 +24,7 @@ from utils.exception import (
 from utils.logger import get_logger
 
 # Type hint only — avoid circular import at runtime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from llm.client import LLMClient
@@ -359,7 +359,7 @@ class ModelManager:
     async def pull_model(
         self,
         model_name: str,
-        progress_callback: callable | None = None,
+        progress_callback: Callable | None = None,
     ) -> bool:
         """
         Pull (download) a model from the Ollama registry.
@@ -415,7 +415,7 @@ class ModelManager:
     # ===================================================================
     async def pull_missing_models(
         self,
-        progress_callback: callable | None = None,
+        progress_callback: Callable | None = None,
     ) -> dict[str, bool]:
         """
         Pull all models that are missing from Ollama.

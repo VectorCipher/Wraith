@@ -19,10 +19,12 @@ class LiveDashboard(ScanCallbacks):
     Implements the ScanCallbacks interface from the Orchestrator.
     """
 
-    def __init__(self, target_url: str):
+    def __init__(self, target_url: str, db_manager=None, scan_id: str = None):
         self.console = Console()
         self.target_url = target_url
         self.start_time = datetime.now()
+        self.db = db_manager
+        self.scan_id = scan_id
         
         # State
         self.current_phase = "Initializing"
@@ -183,6 +185,19 @@ class LiveDashboard(ScanCallbacks):
             
         color = "red" if severity in ["critical", "high"] else "yellow"
         self.reasoning_log.append(f"[{color}][VULN][/] Found {severity.upper()} {vuln.vuln_type.value} at {vuln.endpoint}")
+        
+        if self.db and self.scan_id:
+            self.db.save_vulnerability(self.scan_id, vuln)
+            
+        self.update_layout()
+
+    async def on_endpoint_discovered(self, method: str, path: str) -> None:
+        if self.db and self.scan_id:
+            from models.target import Endpoint
+            # Construct minimal endpoint for db
+            ep = Endpoint(method=method, path=path)
+            self.db.save_endpoint(self.scan_id, ep)
+        self.total_endpoints += 1
         self.update_layout()
 
     async def on_llm_reasoning(self, role: str, content: str) -> None:

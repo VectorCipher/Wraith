@@ -41,24 +41,34 @@ def scan(
         max_duration_minutes=max_duration
     )
     
-    dashboard = LiveDashboard(target_url=url)
+    from databases.db import DatabaseManager
+    db = DatabaseManager()
+    
+    dashboard = LiveDashboard(target_url=url, db_manager=db)
     orchestrator = Orchestrator(config=config, callbacks=dashboard)
+    dashboard.scan_id = orchestrator.scan_id
+    
+    # Persist initial scan state
+    db.save_scan(scan_id=orchestrator.scan_id, target_url=url, status="running", config=config.model_dump())
     
     dashboard.start()
     try:
         asyncio.run(orchestrator.run())
+        db.update_scan_status(orchestrator.scan_id, "completed", complete=True)
     except KeyboardInterrupt:
         dashboard.stop()
+        db.update_scan_status(orchestrator.scan_id, "aborted", complete=True)
         console.print("\n[yellow]Scan interrupted by user.[/yellow]")
         sys.exit(130)
     except Exception as e:
         dashboard.stop()
+        db.update_scan_status(orchestrator.scan_id, "failed", complete=True)
         console.print(f"\n[red]Fatal error during scan: {e}[/red]")
         sys.exit(1)
     finally:
         dashboard.stop()
         
-    console.print("\n[green]Scan completed successfully.[/green]")
+    console.print(f"\n[green]Scan completed successfully. Run `wraith report {orchestrator.scan_id}` to view results.[/green]")
 
 @app.command()
 def models():
@@ -87,7 +97,20 @@ def report(scan_id: str):
     """
     Generate a report from a previous scan.
     """
-    console.print(f"[yellow]Report generation for {scan_id} is not yet implemented.[/yellow]")
+    from databases.db import DatabaseManager
+    from reporters.html_reporter import HtmlReporter
+    
+    console.print(f"[cyan]Generating report for {scan_id}...[/cyan]")
+    try:
+        db = DatabaseManager()
+        reporter = HtmlReporter(db)
+        report_path = reporter.generate_report(scan_id)
+        console.print(f"[green]✔ Report generated successfully![/green]")
+        console.print(f"Path: {report_path}")
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+    except Exception as e:
+        console.print(f"[red]Failed to generate report: {e}[/red]")
 
 if __name__ == "__main__":
     app()

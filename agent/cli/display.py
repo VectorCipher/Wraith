@@ -159,7 +159,7 @@ class LiveDashboard(ScanCallbacks):
         self.scan_progress = 100.0
         self.update_layout()
 
-    async def on_phase_start(self, phase_name: str) -> None:
+    async def on_phase_start(self, phase_name: str, description: str = "") -> None:
         self.current_phase = phase_name
         self.update_layout()
 

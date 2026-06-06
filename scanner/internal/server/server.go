@@ -13,10 +13,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/VectorCipher/Wraith/blob/main/scanner/internal/engine"
-	"github.com/VectorCipher/Wraith/blob/main/scanner/internal/models"
-	"github.com/VectorCipher/Wraith/blob/main/scanner/internal/utils"
-	pb "github.com/VectorCipher/Wraith/blob/main/scanner/proto"
+	"github.com/VectorCipher/Wraith/scanner/internal/engine"
+	"github.com/VectorCipher/Wraith/scanner/internal/models"
+	"github.com/VectorCipher/Wraith/scanner/internal/utils"
+	pb "github.com/VectorCipher/Wraith/scanner/proto"
 )
 
 // ScannerServer implements the pb.ScannerServiceServer interface.

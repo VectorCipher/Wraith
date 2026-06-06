@@ -12,8 +12,8 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"go.uber.org/zap"
 
-	"github.com/VectorCipher/Wraith/blob/main/scanner/internal/utils"
-	pb "github.com/VectorCipher/Wraith/blob/main/scanner/proto"
+	"github.com/VectorCipher/Wraith/scanner/internal/utils"
+	pb "github.com/VectorCipher/Wraith/scanner/proto"
 )
 
 // Crawler performs BFS web crawling to discover endpoints, forms, and links.

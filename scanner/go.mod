@@ -1,5 +1,5 @@
 // Go.mod file defines the module path, Go version, and dependencies
-module github.com/VectorCipher/Wraith/blob/main/scanner
+module github.com/VectorCipher/Wraith/scanner
 
 go 1.23
 

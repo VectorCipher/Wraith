@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # The WRAITH Go Scanner (Muscle)
+  scanner:
+    build:
+      context: ./scanner
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"
+    restart: unless-stopped
+    networks:
+      - wraith_network
+
+  # The WRAITH Python Agent (Brain)
+  # Notice: we don't start this continuously. 
+  # It's an interactive CLI tool. You run it via `docker-compose run agent`
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    environment:
+      # Point the agent to the scanner container
+      - SCANNER_GRPC_HOST=scanner
+      - SCANNER_GRPC_PORT=50051
+      # Configure Ollama host. 
+      # host.docker.internal works for Docker Desktop (Mac/Windows)
+      # On native Linux, you may need to use the docker0 IP (e.g., 172.17.0.1)
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    volumes:
+      # Persist SQLite databases and HTML reports locally
+      - wraith_data:/root/.wraith
+    depends_on:
+      - scanner
+    networks:
+      - wraith_network
+    # Keep container alive if started with docker-compose up, 
+    # but usually users run: docker-compose run --rm agent scan <url>
+    command: ["--help"]
+
+networks:
+  wraith_network:
+    driver: bridge
+
+volumes:
+  wraith_data:

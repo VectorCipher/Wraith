@@ -16,10 +16,10 @@ import (
 	"go.uber.org/zap"//very fast production logger
 	"google.golang.org/grpc"//grpc framework for AI-scanner configuration
 	//Internal Projects Import 
-	"github.com/VectorCipher/Wraith/blob/main/scanner/internal/models"
-	"github.com/VectorCipher/Wraith/blob/main/scanner/internal/server"
-	"github.com/VectorCipher/Wraith/blob/main/scanner/internal/utils"
-	pb "github.com/VectorCipher/Wraith/blob/main/scanner/proto"
+	"github.com/VectorCipher/Wraith/scanner/internal/models"
+	"github.com/VectorCipher/Wraith/scanner/internal/server"
+	"github.com/VectorCipher/Wraith/scanner/internal/utils"
+	pb "github.com/VectorCipher/Wraith/scanner/proto"
 )
 
 func main() {

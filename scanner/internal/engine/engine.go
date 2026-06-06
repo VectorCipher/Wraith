@@ -20,9 +20,9 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 
-	"github.com/VectorCipher/Wraith/blob/main/scanner/internal/models"
-	"github.com/VectorCipher/Wraith/blob/main/scanner/internal/utils"
-	pb "github.com/VectorCipher/Wraith/blob/main/scanner/proto"
+	"github.com/VectorCipher/Wraith/scanner/internal/models"
+	"github.com/VectorCipher/Wraith/scanner/internal/utils"
+	pb "github.com/VectorCipher/Wraith/scanner/proto"
 )
 
 // Engine is the core attack execution engine.

@@ -38,6 +38,9 @@ python-dotenv==1.0.1
 anyio==4.6.0
 websockets==13.0
 
+# v2: Memory System
+chromadb==0.5.23
+
 # Testing
 pytest==8.3.3
 pytest-asyncio==0.24.0

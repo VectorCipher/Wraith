@@ -73,6 +73,47 @@ class DatabaseManager:
                         data_json TEXT,
                         FOREIGN KEY (scan_id) REFERENCES scans (scan_id)
                     );
+
+                    -- v2: Episodic memory — per-target scan history
+                    CREATE TABLE IF NOT EXISTS episodes (
+                        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                        target_host TEXT NOT NULL,
+                        scan_id     TEXT NOT NULL,
+                        tech_stack  TEXT,
+                        endpoints   TEXT,
+                        summary     TEXT,
+                        created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    -- v2: Payload mutation results
+                    CREATE TABLE IF NOT EXISTS payload_results (
+                        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                        scan_id             TEXT NOT NULL,
+                        target_url          TEXT NOT NULL,
+                        payload_raw         TEXT NOT NULL,
+                        attack_class        TEXT,
+                        response_code       INTEGER,
+                        response_body_hash  TEXT,
+                        waf_detected        BOOLEAN DEFAULT 0,
+                        waf_signature       TEXT,
+                        failure_reason      TEXT,
+                        mutation_applied    TEXT,
+                        mutation_succeeded  BOOLEAN,
+                        created_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+                    );
+
+                    -- v2: Skill document index
+                    CREATE TABLE IF NOT EXISTS skills (
+                        skill_id        TEXT PRIMARY KEY,
+                        scan_id         TEXT,
+                        attack_class    TEXT,
+                        target_profile  TEXT,
+                        confidence      TEXT,
+                        reuse_score     REAL,
+                        tags            TEXT,
+                        file_path       TEXT NOT NULL,
+                        created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+                    );
                 ''')
             logger.debug(f"Database initialized at {self.db_path}")
         except Exception as e:

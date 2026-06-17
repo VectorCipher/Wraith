@@ -114,6 +114,24 @@ class WraithSettings(BaseSettings):
     )
 
     # -------------------------------------------------------------------
+    # v2: Memory System
+    # -------------------------------------------------------------------
+    chroma_path: str = Field(
+        default="./data/chroma",
+        description="Directory where ChromaDB persists vector data",
+    )
+    skills_path: str = Field(
+        default="./data/skills",
+        description="Directory where skill Markdown files are stored",
+    )
+    max_skill_retrieval: int = Field(
+        default=10,
+        description="Maximum number of skills to retrieve from memory per scan",
+        ge=1,
+        le=50,
+    )
+
+    # -------------------------------------------------------------------
     # Logging
     # -------------------------------------------------------------------
     log_level: str = Field(
@@ -245,6 +263,8 @@ class WraithSettings(BaseSettings):
         Creates:
             - Database parent directory (e.g. ./data/)
             - Report output directory (e.g. ./reports/)
+            - ChromaDB persistence directory (e.g. ./data/chroma/)
+            - Skills storage directory (e.g. ./data/skills/)
         """
         db_dir = self.db_full_path.parent
         report_dir = self.report_full_path
@@ -254,6 +274,15 @@ class WraithSettings(BaseSettings):
 
         report_dir.mkdir(parents=True, exist_ok=True)
         logger.debug(f"Ensured report directory: {report_dir}")
+
+        # v2: Memory system directories
+        chroma_dir = Path(self.chroma_path).resolve()
+        chroma_dir.mkdir(parents=True, exist_ok=True)
+        logger.debug(f"Ensured ChromaDB directory: {chroma_dir}")
+
+        skills_dir = Path(self.skills_path).resolve()
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        logger.debug(f"Ensured skills directory: {skills_dir}")
 
     def display_summary(self) -> dict[str, str]:
         """

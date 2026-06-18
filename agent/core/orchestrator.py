@@ -44,8 +44,9 @@ from datetime import datetime
 from typing import Any, AsyncGenerator
 
 from config import settings
-from core.memory import ScanMemory
 from core.task_tree import TaskTree
+from databases.db import DatabaseManager
+from memory.manager import MemoryManager
 from llm.client import LLMClient
 from llm.prompt_engine import PromptEngine
 from scanner_client.client import ScannerClient
@@ -145,8 +146,16 @@ class Orchestrator:
         self._llm = LLMClient()
         self._scanner = ScannerClient()
         self._prompt_engine = PromptEngine()
-        self._memory = ScanMemory(scan_id=self._scan_id, config=config)
         self._task_tree = TaskTree(scan_id=self._scan_id, target_url=config.target_url)
+
+        # v2: Database and Memory Manager (replaces raw ScanMemory)
+        self._db = DatabaseManager(db_path=settings.db_path)
+        self._memory = MemoryManager(
+            db_manager=self._db,
+            scan_id=self._scan_id,
+            config=config,
+            chroma_path=settings.chroma_path,
+        )
 
         # Scan state
         self._state = ScanState(scan_id=self._scan_id)
@@ -172,7 +181,7 @@ class Orchestrator:
         return self._state
 
     @property
-    def memory(self) -> ScanMemory:
+    def memory(self) -> MemoryManager:
         return self._memory
 
     @property
@@ -305,6 +314,48 @@ class Orchestrator:
         )
         self._memory.set_target(target)
         self._task_tree.complete_task(task_id, summary=self._config.target_url)
+
+        # v2 Task: Load episodic memory (prior scans of this target)
+        task_id = self._task_tree.add_task(phase, "Load prior knowledge")
+        self._task_tree.start_task(task_id)
+        try:
+            init_result = self._memory.initialize(target_url=self._config.target_url)
+            if init_result["has_history"]:
+                summary = (
+                    f"Loaded {init_result['episode_count']} prior episodes "
+                    f"for this target"
+                )
+                self._memory.log_reasoning(
+                    phase="init",
+                    action="load_episodic_memory",
+                    reasoning="Checked for prior scans of this target",
+                    decision=f"Found {init_result['episode_count']} prior episodes",
+                    outcome="Episodic context injected into working memory",
+                )
+            else:
+                summary = "First engagement — no prior history"
+            self._task_tree.complete_task(task_id, summary=summary)
+        except Exception as e:
+            self._task_tree.fail_task(task_id, reason=str(e))
+            logger.warning(f"Episodic memory load failed (non-fatal): {e}")
+
+        # v2 Task: Retrieve relevant skills from long-term memory
+        task_id = self._task_tree.add_task(phase, "Retrieve attack knowledge")
+        self._task_tree.start_task(task_id)
+        try:
+            # Build a query from the target URL (tech stack will be refined after fingerprinting)
+            skills = self._memory.retrieve_skills(
+                query=f"attack techniques for {self._config.target_url}",
+                top_k=settings.max_skill_retrieval,
+            )
+            if skills:
+                summary = f"{len(skills)} relevant skills retrieved from memory"
+            else:
+                summary = "No prior skills in memory (will learn from this scan)"
+            self._task_tree.complete_task(task_id, summary=summary)
+        except Exception as e:
+            self._task_tree.fail_task(task_id, reason=str(e))
+            logger.warning(f"Skill retrieval failed (non-fatal): {e}")
 
         self._task_tree.complete_phase(phase, summary="All services ready")
         await self._callbacks.on_phase_complete(phase, "All services ready")
@@ -896,11 +947,43 @@ class Orchestrator:
     # ===================================================================
 
     async def _phase_reporting(self) -> None:
-        """Generate the final scan report."""
+        """Generate the final scan report and persist knowledge."""
         phase = "reporting"
         self._update_state(ScanStatus.REPORTING, "Generating report")
         self._task_tree.start_phase(phase)
         await self._callbacks.on_phase_start(phase, "Generating report")
+
+        # v2 Task: Store episodic memory for this scan
+        task_id = self._task_tree.add_task(phase, "Store scan episode")
+        self._task_tree.start_task(task_id)
+        try:
+            episode = self._memory.store_episode()
+            if episode:
+                summary = f"Episode saved for {episode.target_host}"
+            else:
+                summary = "Episode storage skipped"
+            self._task_tree.complete_task(task_id, summary=summary)
+        except Exception as e:
+            self._task_tree.fail_task(task_id, reason=str(e))
+            logger.warning(f"Episode storage failed (non-fatal): {e}")
+
+        # v2 Task: Retrieve updated skills after fingerprinting (refinement)
+        # The initial skill retrieval in init was broad; now with tech stack
+        # info, we can do a more targeted retrieval for future reference.
+        task_id = self._task_tree.add_task(phase, "Index scan learnings")
+        self._task_tree.start_task(task_id)
+        try:
+            # Future phases will add the SkillWriter here.
+            # For now, just log that the hook point exists.
+            self._memory.log_reasoning(
+                phase="reporting",
+                action="index_learnings",
+                reasoning="Post-scan knowledge indexing hook",
+                decision="Skill Writer will be integrated in Phase 2",
+            )
+            self._task_tree.complete_task(task_id, summary="Learning hooks ready")
+        except Exception as e:
+            self._task_tree.fail_task(task_id, reason=str(e))
 
         task_id = self._task_tree.add_task(phase, "Build report data")
         self._task_tree.start_task(task_id)

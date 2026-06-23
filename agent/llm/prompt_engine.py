@@ -1015,3 +1015,94 @@ class PromptEngine:
         truncated += f"\n\n... [TRUNCATED — {remaining} characters omitted]"
 
         return truncated
+
+    # ===================================================================
+    # v2: Memory & Skill Prompt Builders
+    # ===================================================================
+
+    def build_skill_extraction_prompt(
+        self,
+        scan_log: str,
+        skill_id: str,
+        scan_id: str,
+    ) -> str:
+        """
+        Build the skill extraction prompt (Prompt 4 from v2 design doc).
+
+        Used post-scan to extract the most reusable technique
+        discovered during the scan.
+
+        Args:
+            scan_log: Formatted scan log text.
+            skill_id: The skill ID to assign.
+            scan_id: The scan that generated this data.
+
+        Returns:
+            Complete prompt string.
+        """
+        from skills.writer import SkillWriter
+        return SkillWriter.build_skill_extraction_prompt(
+            scan_log=scan_log,
+            skill_id=skill_id,
+            scan_id=scan_id,
+        )
+
+    def build_memory_query_prompt(
+        self,
+        target_url: str,
+        tech_stack: str,
+    ) -> str:
+        """
+        Build the memory query generation prompt (Prompt 1 from v2 design doc).
+
+        Used at scan start to generate semantic queries for
+        retrieving relevant skills from long-term memory.
+
+        Args:
+            target_url: The target being scanned.
+            tech_stack: Detected technology stack description.
+
+        Returns:
+            Complete prompt string.
+        """
+        from skills.writer import SkillWriter
+        return SkillWriter.build_memory_query_prompt(
+            target_url=target_url,
+            tech_stack=tech_stack,
+        )
+
+    def build_attack_plan_with_skills_prompt(
+        self,
+        skill_context: str,
+        episodic_context: str,
+        target_url: str,
+        tech_stack: str,
+        endpoint_count: int,
+        endpoints: str,
+    ) -> str:
+        """
+        Build the enhanced attack planning prompt (Prompt 2 from v2 design doc).
+
+        Includes prior skill knowledge and episodic memory to
+        produce smarter, more targeted attack plans.
+
+        Args:
+            skill_context: Formatted skill context from WorkingMemory.
+            episodic_context: Formatted episodic context.
+            target_url: Current target URL.
+            tech_stack: Detected tech stack description.
+            endpoint_count: Number of discovered endpoints.
+            endpoints: Formatted endpoint list.
+
+        Returns:
+            Complete prompt string.
+        """
+        from skills.writer import SkillWriter
+        return SkillWriter.build_attack_plan_with_skills_prompt(
+            skill_context=skill_context,
+            episodic_context=episodic_context,
+            target_url=target_url,
+            tech_stack=tech_stack,
+            endpoint_count=endpoint_count,
+            endpoints=endpoints,
+        )

@@ -132,6 +132,28 @@ class WraithSettings(BaseSettings):
     )
 
     # -------------------------------------------------------------------
+    # v2: CVE & Exploit Feed
+    # -------------------------------------------------------------------
+    feed_enabled: bool = Field(
+        default=False,
+        description="Enable automatic CVE/exploit feed ingestion",
+    )
+    feed_interval_hours: int = Field(
+        default=24,
+        description="Hours between automatic feed ingestion cycles",
+        ge=1,
+        le=168,
+    )
+    feed_sources: str = Field(
+        default="nvd,exploitdb,nuclei",
+        description="Comma-separated list of feed sources to query",
+    )
+    nvd_api_key: str = Field(
+        default="",
+        description="Optional NVD API key for higher rate limits",
+    )
+
+    # -------------------------------------------------------------------
     # Logging
     # -------------------------------------------------------------------
     log_level: str = Field(

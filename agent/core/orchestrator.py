@@ -587,14 +587,22 @@ class Orchestrator:
             self._task_tree.skip_task(task_id, reason="No target")
             return
 
-        prompt = self._prompt_engine.build_attack_plan_prompt(
-            target=target,
-            scan_config=self._config,
-            findings=[],
-        )
+        # Build individual context blocks for v2 prompt
+        skill_context = self._memory.working.build_skill_context()
+        episodic_context = self._memory.working.build_episodic_context()
+        target_url = self._config.target_url
+        tech_stack = self._memory.working._format_tech_stack(self._memory.tech_stack)
+        endpoint_count = self._memory.endpoint_count
+        endpoints = self._memory.working._format_endpoints(self._memory.get_untested_endpoints())
 
-        memory_context = self._memory.build_full_context()
-        full_prompt = f"{memory_context}\n\n{prompt}"
+        full_prompt = self._prompt_engine.build_attack_plan_with_skills_prompt(
+            skill_context=skill_context,
+            episodic_context=episodic_context,
+            target_url=target_url,
+            tech_stack=tech_stack,
+            endpoint_count=endpoint_count,
+            endpoints=endpoints,
+        )
 
         try:
             response = await self._llm.generate(
@@ -738,10 +746,28 @@ class Orchestrator:
                 )
                 await self._callbacks.on_vulnerability_found(vuln)
             else:
-                self._task_tree.complete_task(
-                    task_id,
-                    summary=f"{len(payloads)} payloads — not vulnerable",
+                # v2: Try payload mutations if initial payloads failed
+                mutation_vuln = await self._try_mutations(
+                    entry=entry,
+                    attack_type=attack_type,
+                    original_payloads=payloads,
+                    result=result,
+                    phase=phase,
                 )
+
+                if mutation_vuln:
+                    self._memory.add_vulnerability(mutation_vuln)
+                    self._task_tree.complete_task(
+                        task_id,
+                        summary=f"⚠️ VULNERABLE (via mutation) — {mutation_vuln.severity.value.upper()}",
+                        findings_count=1,
+                    )
+                    await self._callbacks.on_vulnerability_found(mutation_vuln)
+                else:
+                    self._task_tree.complete_task(
+                        task_id,
+                        summary=f"{len(payloads)} payloads — not vulnerable",
+                    )
 
             await self._callbacks.on_task_complete(task_id, "Attack completed")
 
@@ -751,6 +777,164 @@ class Orchestrator:
         except Exception as e:
             self._task_tree.fail_task(task_id, reason=str(e))
             logger.error(f"Attack execution error: {e}")
+
+    async def _try_mutations(
+        self,
+        entry: Any,
+        attack_type: str,
+        original_payloads: list[str],
+        result: AttackResult,
+        phase: str,
+        max_rounds: int = 3,
+    ) -> Vulnerability | None:
+        """
+        v2: Try payload mutations when initial payloads fail.
+
+        Checks if the failure looks like WAF blocking, then uses the
+        PayloadMutator to generate alternative payloads and retries.
+
+        Args:
+            entry: The endpoint entry being attacked.
+            attack_type: Type of attack (sqli, xss, etc.)
+            original_payloads: The payloads that failed.
+            result: The AttackResult from the initial attempt.
+            phase: Current scan phase name.
+            max_rounds: Maximum mutation rounds to try.
+
+        Returns:
+            Vulnerability if mutation succeeds, None otherwise.
+        """
+        from payload_engine.mutator import PayloadMutator
+        from payload_engine.logger import PayloadLogger, PayloadResult
+
+        # Check if responses suggest WAF blocking
+        blocked_responses = [
+            pr for pr in result.payload_results
+            if pr.status_code in (403, 406, 429, 503)
+        ]
+
+        if not blocked_responses:
+            # No WAF signals — mutations unlikely to help
+            return None
+
+        ep = entry.endpoint
+        endpoint_key = entry.key
+
+        # Initialize mutation engine
+        payload_logger = PayloadLogger(db_manager=self._db)
+        mutator = PayloadMutator(payload_logger=payload_logger)
+
+        # Log the original failures
+        for pr in result.payload_results:
+            payload_logger.log_result(PayloadResult(
+                payload_raw=pr.payload,
+                target_url=f"{self._config.target_url}{ep.path}",
+                scan_id=self._scan_id,
+                attack_class=attack_type,
+                response_code=pr.status_code,
+                response_body=pr.response_body or "",
+                failure_reason="blocked" if pr.status_code in (403, 406, 429, 503) else "",
+            ))
+
+        logger.info(
+            f"WAF detected on {endpoint_key} — "
+            f"{len(blocked_responses)} blocked responses, "
+            f"trying mutations (max {max_rounds} rounds)"
+        )
+
+        # Build failure context for smart mutation ranking
+        failure_context = {
+            "response_code": blocked_responses[0].status_code,
+            "attack_class": attack_type,
+        }
+
+        # Try mutation rounds
+        for round_num in range(1, max_rounds + 1):
+            # Pick a payload that was blocked
+            blocked_payload = blocked_responses[0].payload
+            if round_num > 1 and len(blocked_responses) > 1:
+                blocked_payload = blocked_responses[min(round_num - 1, len(blocked_responses) - 1)].payload
+
+            # Get mutation suggestions
+            suggestions = mutator.suggest_mutations(
+                payload=blocked_payload,
+                failure_context=failure_context,
+                max_mutations=5,
+            )
+
+            if not suggestions:
+                break
+
+            # Extract mutated payloads (skip HEADER: and FRAGMENT: special formats)
+            mutation_payloads = [
+                s["payload"] for s in suggestions
+                if not s["payload"].startswith(("HEADER:", "FRAGMENT:", "HPP:"))
+            ][:5]
+
+            if not mutation_payloads:
+                break
+
+            # Execute mutated payloads via scanner
+            try:
+                mutation_request = AttackRequest(
+                    attack_id=f"mut-{uuid.uuid4().hex[:8]}",
+                    attack_type=attack_type,
+                    target_url=f"{self._config.target_url}{ep.path}",
+                    method=ep.method,
+                    payloads=mutation_payloads,
+                    injection_point=self._get_injection_point(ep, attack_type),
+                    parameter_name=self._get_target_param(ep),
+                    timeout_seconds=self._config.rate_limit,
+                )
+
+                mutation_result = await self._scanner.execute_attack(mutation_request)
+
+                # Log mutation results
+                for pr in mutation_result.payload_results:
+                    succeeded = pr.status_code not in (403, 406, 429, 503)
+                    strategy = suggestions[0]["strategy"] if suggestions else "unknown"
+                    payload_logger.log_result(PayloadResult(
+                        payload_raw=pr.payload,
+                        target_url=f"{self._config.target_url}{ep.path}",
+                        scan_id=self._scan_id,
+                        attack_class=attack_type,
+                        response_code=pr.status_code,
+                        response_body=pr.response_body or "",
+                        mutation_applied=strategy,
+                        mutation_succeeded=succeeded,
+                    ))
+
+                # Record in memory
+                self._memory.record_attack(mutation_result, endpoint_key=endpoint_key)
+
+                # Analyze mutation results
+                vuln = await self._analyze_attack_results(
+                    entry=entry,
+                    attack_type=attack_type,
+                    result=mutation_result,
+                )
+
+                if vuln:
+                    self._memory.log_reasoning(
+                        phase=phase,
+                        action="mutation_success",
+                        reasoning=f"Initial payload blocked, mutation round {round_num} succeeded",
+                        decision=f"Vulnerability confirmed via payload mutation",
+                        outcome=f"{vuln.severity.value.upper()} — {vuln.title}",
+                    )
+                    logger.info(
+                        f"🎯 Mutation round {round_num} succeeded on {endpoint_key}!"
+                    )
+                    return vuln
+
+            except Exception as e:
+                logger.debug(f"Mutation round {round_num} error: {e}")
+                continue
+
+        logger.debug(
+            f"All {max_rounds} mutation rounds exhausted on {endpoint_key}"
+        )
+        return None
 
     async def _analyze_attack_results(
         self,
@@ -967,23 +1151,48 @@ class Orchestrator:
             self._task_tree.fail_task(task_id, reason=str(e))
             logger.warning(f"Episode storage failed (non-fatal): {e}")
 
-        # v2 Task: Retrieve updated skills after fingerprinting (refinement)
-        # The initial skill retrieval in init was broad; now with tech stack
-        # info, we can do a more targeted retrieval for future reference.
-        task_id = self._task_tree.add_task(phase, "Index scan learnings")
+        # v2 Task: Extract and index skill from this scan
+        task_id = self._task_tree.add_task(phase, "Extract reusable skill")
         self._task_tree.start_task(task_id)
         try:
-            # Future phases will add the SkillWriter here.
-            # For now, just log that the hook point exists.
-            self._memory.log_reasoning(
-                phase="reporting",
-                action="index_learnings",
-                reasoning="Post-scan knowledge indexing hook",
-                decision="Skill Writer will be integrated in Phase 2",
+            from skills.writer import SkillWriter
+            from skills.indexer import SkillIndexer
+
+            indexer = SkillIndexer(
+                skills_dir=settings.skills_path,
+                longterm_memory=self._memory.longterm,
+                db_manager=self._db,
             )
-            self._task_tree.complete_task(task_id, summary="Learning hooks ready")
+            writer = SkillWriter(
+                llm_client=self._llm,
+                indexer=indexer,
+                skills_dir=settings.skills_path,
+            )
+
+            scan_log = self._memory.export_for_report()
+            skill_doc = await writer.extract_and_save(
+                scan_id=self._scan_id,
+                scan_log=scan_log,
+            )
+
+            if skill_doc:
+                summary = (
+                    f"Skill extracted: {skill_doc.skill_id} "
+                    f"({skill_doc.attack_class}, {skill_doc.confidence})"
+                )
+                self._memory.log_reasoning(
+                    phase="reporting",
+                    action="skill_extraction",
+                    reasoning="Extracted reusable technique from scan results",
+                    decision=f"Generated skill {skill_doc.skill_id}",
+                    outcome=f"{skill_doc.attack_class} — {skill_doc.title}",
+                )
+            else:
+                summary = "No skill extracted (insufficient data)"
+            self._task_tree.complete_task(task_id, summary=summary)
         except Exception as e:
             self._task_tree.fail_task(task_id, reason=str(e))
+            logger.warning(f"Skill extraction failed (non-fatal): {e}")
 
         task_id = self._task_tree.add_task(phase, "Build report data")
         self._task_tree.start_task(task_id)

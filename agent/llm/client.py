@@ -131,12 +131,21 @@ class LLMClient:
         """
         Generate a response from a single prompt.
 
-        Uses Ollama's /api/generate endpoint. The model is selected
-        based on the role ("reasoning" or "coding") from models.yaml.
-
+        Routes to Ollama or OpenRouter based on settings.llm_provider.
         """
+        if settings.llm_provider == "openrouter":
+            # Delegate to chat logic for OpenRouter (it only exposes chat completions API)
+            messages = [{"role": "user", "content": prompt}]
+            return await self.chat(
+                role=role,
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            
         model_config = self._get_model_config(role)
-        model_name = model_config["model_name"]
+        model_name = settings.model if settings.llm_provider == "openrouter" and settings.model else model_config["model_name"]
 
         options = self._build_options(model_config, temperature, max_tokens)
         effective_system = system_prompt or model_config.get("system_prompt", "")
@@ -181,12 +190,10 @@ class LLMClient:
         """
         Generate a response from a chat conversation.
 
-        Uses Ollama's /api/chat endpoint. Supports multi-turn
-        conversations with message history.
-
+        Routes to Ollama or OpenRouter based on settings.llm_provider.
         """
         model_config = self._get_model_config(role)
-        model_name = model_config["model_name"]
+        model_name = settings.model if settings.llm_provider == "openrouter" and settings.model else model_config["model_name"]
 
         options = self._build_options(model_config, temperature, max_tokens)
         effective_system = system_prompt or model_config.get("system_prompt", "")
@@ -194,6 +201,7 @@ class LLMClient:
 
         logger.debug(
             f"[chat] Role: {role} | Model: {model_name} | "
+            f"Provider: {settings.llm_provider} | "
             f"Messages: {len(full_messages)} | "
             f"Last msg: {len(messages[-1]['content'])} chars"
         )
@@ -201,20 +209,116 @@ class LLMClient:
         start_time = time.monotonic()
 
         try:
-            raw_response = await self._client.chat(
-                model=model_name,
-                messages=full_messages,
-                options=options,
-            )
+            if settings.llm_provider == "openrouter":
+                raw_response = await self._openrouter_chat(
+                    model=model_name,
+                    messages=full_messages,
+                    options=options,
+                )
+            else:
+                raw_response = await self._client.chat(
+                    model=model_name,
+                    messages=full_messages,
+                    options=options,
+                )
         except Exception as e:
             self._handle_error(e, model_name)
 
         elapsed_ms = (time.monotonic() - start_time) * 1000
-        result = self._parse_chat_response(raw_response, role, elapsed_ms)
+        
+        if settings.llm_provider == "openrouter":
+            result = self._parse_openrouter_response(raw_response, model_name, role, elapsed_ms)
+        else:
+            result = self._parse_chat_response(raw_response, role, elapsed_ms)
 
         self._track_usage(result)
         logger.info(f"[chat] {result.summary}")
         return result
+
+    # ===================================================================
+    # INTERNAL: OpenRouter Integration
+    # ===================================================================
+    async def _openrouter_chat(self, model: str, messages: list[dict], options: dict) -> dict:
+        """Make a request to OpenRouter API using httpx."""
+        import httpx
+        
+        if not settings.openrouter_api_key:
+            raise LLMConnectionError("OpenRouter API key is not configured in settings or CLI prompt.")
+            
+        headers = {
+            "Authorization": f"Bearer {settings.openrouter_api_key}",
+            "HTTP-Referer": "https://github.com/VectorCipher/Wraith",
+            "X-Title": "WRAITH Autonomous Pentester",
+        }
+        
+        # OpenRouter accepts OpenAI-compatible payloads
+        payload = {
+            "model": model,
+            "messages": messages,
+            "temperature": options.get("temperature", 0.3),
+        }
+        
+        # Add optional params if set
+        if "num_predict" in options:
+            payload["max_tokens"] = options["num_predict"]
+        if "top_p" in options:
+            payload["top_p"] = options["top_p"]
+            
+        async with httpx.AsyncClient(timeout=float(self._timeout)) as client:
+            try:
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                # Get the detailed error from OpenRouter if available
+                error_body = getattr(e, "response", None)
+                if error_body:
+                    try:
+                        error_data = error_body.json()
+                        error_msg = error_data.get("error", {}).get("message", str(e))
+                        raise LLMConnectionError(f"OpenRouter API error: {error_msg}")
+                    except Exception:
+                        pass
+                raise LLMConnectionError(f"HTTP error communicating with OpenRouter: {e}")
+                
+    def _parse_openrouter_response(
+        self,
+        raw_response: dict,
+        model_name: str,
+        role: str,
+        elapsed_ms: float,
+    ) -> LLMResponse:
+        """Parse OpenAI-compatible response from OpenRouter."""
+        try:
+            message = raw_response["choices"][0]["message"]
+            raw_text = message.get("content", "")
+            
+            thinking, content = self._extract_thinking(raw_text)
+            
+            usage = raw_response.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            
+            tokens_per_second = 0.0
+            if completion_tokens > 0 and elapsed_ms > 0:
+                tokens_per_second = (completion_tokens / elapsed_ms) * 1000
+                
+            return LLMResponse(
+                content=content,
+                model=model_name,
+                role=role,
+                thinking=thinking,
+                total_duration_ms=elapsed_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                tokens_per_second=tokens_per_second,
+            )
+        except (KeyError, IndexError) as e:
+            raise WraithError(f"Failed to parse OpenRouter response: {e}")
 
     # ===================================================================
     # PUBLIC API: Streaming Generate (token-by-token)
@@ -235,7 +339,7 @@ class LLMClient:
 
         """
         model_config = self._get_model_config(role)
-        model_name = model_config["model_name"]
+        model_name = settings.model if settings.llm_provider == "openrouter" and settings.model else model_config["model_name"]
 
         options = self._build_options(model_config, temperature, max_tokens)
         effective_system = system_prompt or model_config.get("system_prompt", "")
@@ -278,7 +382,7 @@ class LLMClient:
 
         """
         model_config = self._get_model_config(role)
-        model_name = model_config["model_name"]
+        model_name = settings.model if settings.llm_provider == "openrouter" and settings.model else model_config["model_name"]
 
         options = self._build_options(model_config, temperature, max_tokens)
         effective_system = system_prompt or model_config.get("system_prompt", "")
@@ -314,11 +418,17 @@ class LLMClient:
     # ===================================================================
     async def check_connection(self) -> bool:
         """
-        Check if the Ollama server is reachable.
+        Check if the LLM server is reachable.
 
         Returns:
             True if server responds, False otherwise.
         """
+        if settings.llm_provider == "openrouter":
+            if not settings.openrouter_api_key:
+                logger.warning("OpenRouter API key is missing")
+                return False
+            return True
+            
         try:
             await self._client.list()
             logger.debug("Ollama connection check: OK")
@@ -330,13 +440,19 @@ class LLMClient:
     async def list_models(self) -> list[str]:
         """
         List all models available in the local Ollama instance.
+        If using OpenRouter, returns the configured model name to bypass checks.
 
         Returns:
-            List of model name strings (e.g. ["llama3.1:8b", "qwen2.5-coder:14b"]).
+            List of model name strings.
 
         Raises:
             LLMConnectionError: Cannot reach Ollama server.
         """
+        if settings.llm_provider == "openrouter":
+            # For OpenRouter, assume the configured model is available
+            # since there are too many to fetch and filter easily.
+            return [settings.model]
+            
         try:
             response = await self._client.list()
 
@@ -392,6 +508,10 @@ class LLMClient:
         Get detailed information about a specific model.
 
         """
+        if settings.llm_provider == "openrouter":
+            # Mock response for OpenRouter since we don't need local details
+            return {"model": model_name, "details": {"family": "cloud", "format": "api"}}
+            
         try:
             info = await self._client.show(model_name)
 

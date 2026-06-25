@@ -8,10 +8,13 @@
 # The active model is set via MODEL= in your .env file (or settings.py default).
 # No code changes required to swap models — just update MODEL= in .env.
 #
-# Requirements:
+# Using Ollama (Local):
 #   - Model must be available in your local Ollama instance
 #   - Pull the model first:  ollama pull <model_name>
-#   - Verify with:           ollama list
+#
+# Using OpenRouter (Cloud):
+#   - Set LLM_PROVIDER=openrouter and provide OPENROUTER_API_KEY in .env
+#   - Set MODEL= to any OpenRouter model string (e.g. anthropic/claude-3.5-sonnet)
 #
 # =============================================================================
 

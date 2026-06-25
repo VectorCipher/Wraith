@@ -64,6 +64,14 @@ class WraithSettings(BaseSettings):
         default="qwen3.5:9b",
         description="Ollama model name used for all AI tasks (reasoning + coding)",
     )
+    llm_provider: str = Field(
+        default="ollama",
+        description="LLM provider: 'ollama' or 'openrouter'",
+    )
+    openrouter_api_key: str = Field(
+        default="",
+        description="API key for OpenRouter",
+    )
 
     # -------------------------------------------------------------------
     # Go Scanner (gRPC) Settings

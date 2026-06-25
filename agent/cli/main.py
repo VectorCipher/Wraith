@@ -35,6 +35,31 @@ def scan(
     """
     Start an autonomous penetration test against a target URL.
     """
+    from config import settings
+    
+    console.print("\n[cyan]WRAITH requires an LLM to act as its reasoning engine.[/cyan]")
+    console.print("Please select your LLM provider:")
+    console.print("  [1] Ollama (Local, requires 'ollama serve' running)")
+    console.print("  [2] OpenRouter (Cloud, requires API key)")
+    
+    choice = typer.prompt("Enter your choice (1 or 2)", default="1")
+    
+    if choice == "2":
+        settings.llm_provider = "openrouter"
+        api_key = typer.prompt("Enter your OpenRouter API Key", hide_input=True)
+        if not api_key.strip():
+            console.print("[red]API Key is required for OpenRouter.[/red]")
+            raise typer.Abort()
+        settings.openrouter_api_key = api_key.strip()
+        
+        model_name = typer.prompt("Enter the OpenRouter model name (e.g. anthropic/claude-3-sonnet)", default="anthropic/claude-3-sonnet")
+        if model_name.strip():
+            settings.model = model_name.strip()
+    else:
+        settings.llm_provider = "ollama"
+        # Optional: We could do a quick health check here for Ollama,
+        # but the client initialization will catch connection errors anyway.
+
     config = ScanConfig(
         target_url=url,
         mode=mode,

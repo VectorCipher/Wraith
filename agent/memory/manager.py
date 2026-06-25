@@ -453,6 +453,14 @@ class MemoryManager:
     def export_for_report(self) -> dict[str, Any]:
         """Delegate to ScanMemory.export_for_report()."""
         return self.scan_memory.export_for_report()
+        
+    def build_target_context(self) -> str:
+        """Delegate to ScanMemory.build_target_context()."""
+        return self.scan_memory.build_target_context()
+
+    def build_endpoint_context(self) -> str:
+        """Delegate to ScanMemory.build_endpoint_context()."""
+        return self.scan_memory.build_endpoint_context()
 
     def get_progress_display(self) -> str:
         """Delegate to ScanMemory.get_progress_display()."""

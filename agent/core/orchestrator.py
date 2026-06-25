@@ -589,11 +589,11 @@ class Orchestrator:
 
         # Build individual context blocks for v2 prompt
         skill_context = self._memory.working.build_skill_context()
-        episodic_context = self._memory.working.build_episodic_context()
+        episodic_context = self._memory.working.episodic_context
         target_url = self._config.target_url
-        tech_stack = self._memory.working._format_tech_stack(self._memory.tech_stack)
+        tech_stack = self._prompt_engine._format_tech_stack(self._memory.tech_stack)
         endpoint_count = self._memory.endpoint_count
-        endpoints = self._memory.working._format_endpoints(self._memory.get_untested_endpoints())
+        endpoints = self._prompt_engine._format_endpoints(self._memory.get_untested_endpoints())
 
         full_prompt = self._prompt_engine.build_attack_plan_with_skills_prompt(
             skill_context=skill_context,
